@@ -1,0 +1,54 @@
+user_profile:
+  # === 基础信息 ===
+  name: "用户"
+  experience_level: "新手"
+  entry_date: "2026-03-01"
+
+  # === 资金信息（2026-05-21更新）===
+  total_capital_wan: 6.0   # 约6万（工业富联市值~2万 + 现金~4万）
+  target_capital_wan: 10
+  available_cash_wan: 4.0  # 5/21通富/高新兴/许继电气三只止盈止损后约4万现金
+
+  # === 当前持仓（2026-05-21止盈止损后）===
+  current_holdings:
+    - code: "601138"
+      name: "工业富联"
+      shares: 300
+      cost: 51.91
+      role: "底舱"
+      max_shares: 500
+
+  # === 偏好设置 ===
+  hold_period_preference: "中线偏长"
+  risk_tolerance: "中"
+  position_max_per_stock_pct: 25
+  max_total_stocks: 6
+  prefer_price_range: [3, 100]
+
+  # === 板块认知 ===
+  preferred_sectors:
+    - "AI算力"
+    - "半导体"
+    - "电力设备"
+    - "创新药"
+  avoid_sectors:
+    - "连板妖股"
+    - "次新股炒作"
+    - "纯题材无业绩"
+
+  # === 操作习惯 ===
+  trading_style: "趋势跟随+底仓持有"
+  use_stop_orders: true
+  check_frequency: "每周2-3次"
+
+  # === 学习目标 ===
+  learning_focus_2026:
+    - "板块5阶段判断"
+    - "资金面分析"
+    - "出货型涨停识别"
+    - "角色化持仓管理"
+
+  # === 版本与校准 ===
+  profile_version: "1.1"
+  profile_created: "2026-05-14"
+  next_calibration_date: "2026-08-14"

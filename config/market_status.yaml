@@ -1,0 +1,1076 @@
+# 更新频率：子赛道字段每月初手动维护（wave_number/wave_position/leader_stocks/catalyst_quality/last_updated）
+# stage:         启动期 / 主升期 / 整理期 / 调整期 / 过热期
+# style_position: 低位 / 低中位 / 中位 / 中高位 / 高位
+# priority:      1=本月重点 / 2=观察机会 / 3=暂缓
+# wave_number:   1/2/3/4，本轮行情第几波主升（null=未评估）
+# wave_position: 启动/主升早/主升中/主升晚/调整（null=未评估）
+# leader_stocks: 子赛道龙头代码列表（参考展示用）
+# sector_20d_pct: 板块近20日涨幅%（参考展示，不参与评分）
+# catalyst_quality: 超预期/事件型/纯动量（null=未评估）
+# last_updated:  本子赛道数据最后更新日期
+
+last_updated: "2026-06-01"
+next_update_reminder: "2026-07-01"
+# v1: 主线三扩充数据中心互联链（光模块/CPO/PCB/光纤/交换机），共10个子赛道
+# v2: +核电/SMR(P1) +卫星互联网(P2) 归入主线三；+工业母机(P2) 归入主线二；共46个子赛道
+# v2.0: 新增 wave_number/wave_position/leader_stocks/sector_20d_pct/catalyst_quality/last_updated 字段
+# v2.1: 2026-06-01月度更新，波次全量填写；passive_components升级为主升期（MLCC 4/7起已涨88%）
+
+# ============================================================
+# 十五五四大战略主线（季度锚定）
+# 半导体：精细到子赛道（制裁触发独立行情）
+# 其余三个：赛道级颗粒度（资金以板块为单位轮动）
+# ============================================================
+#
+# ai_correlation 字段说明（每个子赛道必填）：
+#   positive  = 与AI科技正相关，AI涨时同涨，AI跌时跟跌（半导体/光模块/PCB/机器人）
+#   hybrid    = 双重属性，算电协同时共振，AI过热时接替（算电/电力设备）
+#   counter   = 与AI负相关，AI吸水时被抽，AI歇脚时接棒（高股息电力/水电/银行）
+#   independent = 相对独立，受宏观/政策驱动而非AI情绪（创新药/消费）
+#
+# seesaw_partner 字段：与哪个方向形成主要跷跷板对（可选）
+#
+# 两市成交额水位校准（2026年新常态：日均约3万亿）：
+#   < 2.5万亿 = 缩量偏冷
+#   2.5-3.5万亿 = 正常
+#   > 3.5万亿 = 放量偏热
+#   > 4.5万亿 = 极热
+# ============================================================
+theme_framework:
+
+  # ── 主线一：半导体全链 ──────────────────────────────────
+  semiconductor:
+    label: "半导体全链"
+    ai_correlation: "positive"
+    note: "每个子赛道单独跟踪，制裁清单逐项触发独立行情"
+    sub_sectors:
+
+      # 设备层
+      equipment_etch_cvd:
+        label: "刻蚀/薄膜沉积设备"
+        stage: "主升期"
+        style_position: "中高位"
+        priority: 2
+        wave_number: 2
+        wave_position: "主升中"
+        leader_stocks: ["002371"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      equipment_measure:
+        label: "量测检测设备"
+        stage: "启动期"
+        style_position: "中位"
+        priority: 1
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["300604"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-07"
+        note: "待验证：豆包评估认为国产化落地超预期，精测电子20日涨幅约18%，建议升级为主升期。需终端确认精测电子(300604)现价及MA20位置。"
+
+      equipment_cmp_clean:
+        label: "CMP/清洗/涂胶显影设备"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      equipment_packaging:
+        label: "封装/测试设备"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 1
+        wave_position: "主升早"
+        leader_stocks: ["300316"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      # 晶圆制造材料层
+      material_wafer:
+        label: "大硅片"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["600206"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      material_photoresist:
+        label: "光刻胶"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: ["603650"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      material_specialty_gas:
+        label: "电子特气/特种气体"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 1
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["002409"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      material_wet_chemicals:
+        label: "湿电子化学品（电子级酸碱）"
+        stage: "启动期"
+        style_position: "低位"
+        priority: 1
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["300236"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      material_photomask:
+        label: "光掩模版"
+        stage: "启动期"
+        style_position: "低位"
+        priority: 1
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      material_precursor:
+        label: "ALD/CVD前驱体"
+        stage: "启动期"
+        style_position: "低位"
+        priority: 1
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      material_target:
+        label: "靶材"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["300666"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      material_cmp_slurry:
+        label: "CMP抛光液/抛光垫"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["300054"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      material_quartz:
+        label: "石英玻璃/陶瓷零部件"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: ["603185"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      # 封装材料层
+      material_substrate:
+        label: "封装载板/基板"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 1
+        note: "先进封装核心材料，国产化率最低，重点关注"
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["002916"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      material_bond_wire:
+        label: "键合线"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      # 芯片设计层
+      design_eda_ip:
+        label: "EDA/IP设计工具"
+        stage: "启动期"
+        style_position: "低位"
+        priority: 1
+        note: "国产化率<5%，极度卡脖子，政策事件驱动强"
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["301269"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      design_logic:
+        label: "逻辑芯片（CPU/GPU/NPU）"
+        stage: "调整期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["300474", "603893"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-07"
+        note: "2026-06-07降级：海光信息358→274，跌幅23.5%，超过整理期范畴，已进入调整期。制裁催化在5月中旬兑现后资金大幅撤退。下一升级条件：新一轮制裁扩围或国产算力采购大单。"
+
+      design_memory_hbm:
+        label: "存储/HBM相关"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 1
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: ["603986"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      design_analog:
+        label: "模拟芯片"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["300661", "300782"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      design_fpga:
+        label: "FPGA"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 2
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["002049"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      # 晶圆代工/封测层
+      foundry:
+        label: "晶圆代工"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      packaging_advanced:
+        label: "先进封装（含HBM封测）"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 1
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: ["002156", "600584"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      hbm_ecosystem:
+        label: "HBM产业链（封测/材料/接口）"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 1
+        note: "长鑫/长存HBM量产驱动；封测(通富独家)+材料(雅克独家前驱体)+接口(澜起)联动；长鑫IPO已上会为近期最强催化"
+        wave_number: 1
+        wave_position: "主升早"
+        leader_stocks: ["002156", "002409"]
+        sector_20d_pct: 18
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      # 第三/四代半导体
+      sic_gan:
+        label: "第三代半导体（SiC/GaN）"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["603290", "600703"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      diamond_substrate:
+        label: "金刚石功能材料（第四代候选）"
+        stage: "启动期"
+        style_position: "低位"
+        priority: 2
+        note: "CVD金刚石衬底/散热片；培育钻的半导体逻辑；弹性大但事件驱动"
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["301071"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      # 精密配套
+      precision_parts:
+        label: "半导体精密零部件/腔体管路"
+        stage: "启动期"
+        style_position: "低位"
+        priority: 2
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["603076"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+  # ── 主线二：机器人 ──────────────────────────────────────
+  robotics:
+    label: "机器人"
+    ai_correlation: "positive"
+    seesaw_partner: "高股息/防御性电力"
+    note: "资金以板块为单位轮动，子赛道之间联动性强"
+    sub_sectors:
+
+      humanoid_body:
+        label: "人形机器人整机/本体"
+        stage: "整理期"
+        style_position: "高位"
+        priority: 2
+        wave_number: 3
+        wave_position: "调整"
+        leader_stocks: ["002747"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      humanoid_parts:
+        label: "人形机器人核心零部件"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        note: "2026-06-08降级：汇川技术20日超额-2.3%（vs创业板），处于整理/调整边界，Gemini判断正确——订单存在但业绩尚未在报表体现，资金开始观望。下一升级条件：Optimus Gen3 Q3出货数据确认。"
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["300124", "002050"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-08"
+
+      industrial_robot:
+        label: "工业机器人/自动化"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      machine_vision:
+        label: "机器视觉"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["002415"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      cnc_machine_tools:
+        label: "工业母机/高端数控机床"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        note: "机器人+半导体设备国产化的制造基础；制裁压力间接推升国产机床需求；资金以工业自动化为单位轮动"
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["605086"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+  # ── 主线三：AI算力 + 算电协同 + 数据中心互联链 ───────────
+  ai_computing:
+    label: "AI算力+算电协同+数据中心互联"
+    ai_correlation: "positive"
+    note: "算电协同物理约束驱动最确定；互联链条（光模块/PCB/光纤）是算力扩容的隐性受益"
+    sub_sectors:
+
+      ai_chip:
+        label: "AI芯片国产替代"
+        stage: "主升期"
+        style_position: "中高位"
+        priority: 1
+        wave_number: 2
+        wave_position: "主升中"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      ai_infra:
+        label: "AI算力基础设施（服务器/存储）"
+        stage: "主升期"
+        style_position: "中高位"
+        priority: 1
+        note: "2026-06-08升级：工业富联20日超额+13.3%（vs创业板），周校准信号确认主升。H1财报+新Capex公告为下一催化。"
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: ["601138"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-08"
+
+      ai_application:
+        label: "AI应用/大模型/智能体SaaS"
+        stage: "主升期"
+        style_position: "中高位"
+        priority: 2
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: ["002230"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      physical_ai:
+        label: "物理AI/具身智能软件"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 1
+        note: "与机器人主线高度联动（humanoid_parts/humanoid_body），是AI大脑层；两主线同时计分"
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      # 算电协同（两种资金行为，需分开追踪）
+      power_grid:
+        label: "算电协同—电网设备/变压器/特高压"
+        stage: "调整期"
+        style_position: "中位"
+        priority: 2
+        note: "政策周期型，机构主导；国常会/特高压规划触发独立行情，与AI情绪相关性低。2026-06-06调整：龙头特变电工60日-21.5%，板块进入调整，等下一轮政策窗口"
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["600816", "600089"]
+        sector_20d_pct: -18
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-06"
+
+      power_ups_cooling:
+        label: "算电协同—UPS/精密温控/液冷"
+        stage: "主升期"
+        style_position: "低中位"
+        priority: 1
+        note: "2026-06-07升级：Gemini+豆包一致认为液冷订单在AI数据中心批量落地，已从启动进入主升早；英维克(002837)等AI数据中心热管理核心受益，近20日涨幅约25%，算力需求下游，涨跌与AI服务器板块高度联动"
+        wave_number: 1
+        wave_position: "主升早"
+        leader_stocks: ["002335", "002837"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-07"
+
+      # 数据中心互联链条
+      optical_module_cpo:
+        label: "光模块/CPO/硅光"
+        stage: "主升期"
+        style_position: "中高位"
+        priority: 1
+        note: "2026-06-07升级确认：中际旭创(300308)现价1179元，已破千元创新高，Claude评估准确，豆包有误。周五跌7.8%为美股非农数据冲击引发的情绪性回调，非趋势逆转。CPO规模化落地是下一波加速催化；1.6T规模出货元年，订单排至2027-28年。高位注意回调不追，等回踩MA10-MA20再建仓。"
+        wave_number: 2
+        wave_position: "主升中"
+        leader_stocks: ["300308", "300394"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-07"
+
+      pcb_ai_server:
+        label: "AI服务器高速PCB/覆铜板/铜箔"
+        stage: "主升期"
+        style_position: "中高位"
+        priority: 1
+        note: "AI服务器PCB层数/用量远高于传统服务器；铜箔受益AI+电动车双轮驱动；2026-05-27多股涨停确认主升启动"
+        wave_number: 1
+        wave_position: "主升早"
+        leader_stocks: ["002463", "300476"]
+        sector_20d_pct: 25
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      fiber_optical_dc:
+        label: "光纤光缆/数据中心骨干互联"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        note: "AI数据中心间长距互联，新基建叠加AI需求；弹性低于光模块但确定性高"
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["600522", "600487"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      ai_network_infra:
+        label: "AI网络交换机/高速铜互联/连接器"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        note: "400G/800G以太网+InfiniBand集群组网；高速铜互联（DAC/AEC）是光模块补充路线"
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["000063"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      power_nuclear:
+        label: "核电/核能小堆（SMR）"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 1
+        note: "AI数据中心清洁稳定电源；国家核电十五五规划+SMR小堆商业化是主催化；与power_grid独立资金行为"
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["601985", "000777"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      satellite_comms:
+        label: "卫星互联网/空天通信"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        note: "2026-06-07与commercial_space同步降级：龙头已从高位回落30%+，第一波行情结束后整理中。与commercial_space同步跟踪，下一波等具体发射节点催化触发。"
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["600118"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-07"
+
+      passive_components:
+        label: "被动元件（MLCC/电感/电阻）"
+        stage: "过热期"
+        style_position: "高位"
+        priority: 3
+        note: "⚠️ 2026-06-07三模型一致升级：4/7启动至今涨幅88%，估值历史分位95-99.6%，换手率连续超15%，AI服务器MLCC催化已过度定价。逻辑未坏但短线风险极高，不建议追高，等高位筹码消化完成后再降级重入。原逻辑：AI服务器MLCC用量约为普通服务器10倍；Q1净利+46.25%；顺络已入英伟达供应链。"
+        wave_number: 1
+        wave_position: "过热"
+        leader_stocks: ["300408", "002138"]
+        sector_20d_pct: 35
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-07"
+
+      ai_chip_domestic:
+        label: "国产AI芯片（科创板信号标的）"
+        stage: "主升期"
+        style_position: "高位"
+        priority: 1
+        note: "寒武纪/海光/澜起等为科创板不可交易标的；其涨停是AI算力主线热度的关键信号；可交易的二阶受益通过ai_chip/hbm_ecosystem赛道参与"
+        wave_number: 2
+        wave_position: "主升晚"
+        leader_stocks: ["688256", "688041"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+  # ── 主线四：无人驾驶 ────────────────────────────────────
+  autonomous_driving:
+    label: "无人驾驶"
+    note: "2026年L3法规落地+Robotaxi扩张城市，催化剂时间线明确"
+    sub_sectors:
+
+      sensor_lidar_radar:
+        label: "传感器（激光雷达/毫米波雷达）"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      domain_controller:
+        label: "域控制器/智能座舱/车载算力"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 1
+        wave_number: 1
+        wave_position: "主升早"
+        leader_stocks: ["002920", "300496"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      hd_map_v2x:
+        label: "高精地图/V2X通信"
+        stage: "启动期"
+        style_position: "低位"
+        priority: 2
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["002405"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      robotaxi:
+        label: "Robotaxi运营/平台"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 1
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: []
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+  # ── 主线五：电力产业链 ──────────────────────────────────
+  power_industry:
+    label: "电力产业链"
+    ai_correlation: "hybrid"
+    seesaw_partner: "AI算力/半导体"
+    note: "新型电力系统全链：风/光/核/水发电 + 特高压/输配电 + 储能 + 充电桩；十五五能源网是最大投资主线之一。子赛道差异大：特高压/算电协同偏positive，水电/高股息电力偏counter"
+    sub_sectors:
+
+      wind_power_equipment:
+        label: "风电设备（整机/叶片/塔筒/主轴/铸件）"
+        stage: "调整期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["002202", "601615"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-08"
+        note: "2026-06-08降级：金风科技20日超额-17.5%（vs创业板），调整期信号明确。装机催化已兑现，价格战担忧压制估值。等新一轮招标或整机报价企稳再升级。"
+
+      solar_pv_system:
+        label: "光伏全链（组件/电池片/硅料/逆变器）"
+        stage: "整理期"
+        style_position: "低中位"
+        priority: 2
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["601012", "600438", "300274"]
+        sector_20d_pct: null
+        catalyst_quality: "纯动量"
+        last_updated: "2026-06-01"
+
+      energy_storage:
+        label: "储能系统（电芯/PCS/BMS/系统集成）"
+        stage: "调整期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["300750", "300014"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-08"
+        note: "2026-06-08降级：宁德时代20日超额-8.9%（vs创业板），调整期信号明确。资金从电力链撤出流向AI算力链。等出海大单或价格战缓和信号再升级。"
+
+      hvdc_transmission:
+        label: "特高压/换流阀/直流输电"
+        stage: "调整期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["600089", "600816"]
+        sector_20d_pct: -18
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-06"
+        note_update: "2026-06-06 轻量日扫发现特变电工60日-21.5%，与原主升期严重不符，降级为调整期；等下一轮政策催化（特高压规划落地）再升级"
+
+      grid_equipment:
+        label: "输配电设备（变压器/开关柜/互感器/电缆）"
+        stage: "主升期"
+        style_position: "中位"
+        priority: 1
+        wave_number: 2
+        wave_position: "主升早"
+        leader_stocks: ["002028", "601179"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      nuclear_power:
+        label: "核电/核能小堆（SMR）"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["601985", "600875"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-08"
+        note: "2026-06-08降级：中国核电20日超额-1.4%（vs创业板），处于整理/调整边界。十五五规划逻辑未变，但短期资金关注度降低。等核准提速或AIDC用电政策催化再升级。"
+
+      hydro_power:
+        label: "水电/抽水蓄能"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["600900"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      smart_grid:
+        label: "智能电网/电力IT/调度自动化"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 2
+        wave_number: 1
+        wave_position: "启动"
+        leader_stocks: ["600816", "000682"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-01"
+
+      ev_charging:
+        label: "充电桩/电力电子模块"
+        stage: "整理期"
+        style_position: "低位"
+        priority: 2
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["300001"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+  # ── 主线六：六张网+新兴支柱 ──────────────────────────────
+  six_networks_emerging:
+    label: "六张网+新兴支柱产业"
+    ai_correlation: "independent"
+    note: "六张网（交通/水/航天/物流）+ 新兴国民支柱（创新药/低空经济/新能源汽车）；各子赛道按资金喜好度排优先级。创新药/消费偏counter，低空/商业航天偏positive"
+    sub_sectors:
+
+      commercial_space:
+        label: "商业航天（卫星制造/低轨组网/火箭）"
+        stage: "调整期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["600118", "601698"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-08"
+        note: "2026-06-08降级：中国卫通20日超额-26%（vs创业板），调整期信号明确。中国卫星高点127.77→现价84.95，-33.5%。2025年底第一波已结束，当前资金主动流出。下一升级条件：明确千帆发射节点公告+信号股重新站上MA20+超额转正。"
+
+      low_altitude_economy:
+        label: "低空经济（eVTOL/无人机/通用航空）"
+        stage: "启动期"
+        style_position: "低中位"
+        priority: 1
+        wave_number: 2
+        wave_position: "启动"
+        leader_stocks: ["600038", "002085"]
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        last_updated: "2026-06-01"
+
+      innovative_drug:
+        label: "创新药（PD-1/ADC/GLP-1/CGT/mRNA）"
+        stage: "调整期"
+        style_position: "中位"
+        priority: 3
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["600276", "603259"]
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-08"
+        note: "2026-06-08降级：恒瑞医药20日超额-11.2%（vs创业板），调整期信号。Claude评估正确：2025年β行情已结束，当前进入挑α阶段。板块整体不适合配置，需精选有BD分成或临床数据兑现的个股。"
+
+      nev_core:
+        label: "新能源汽车核心（电池/电机/电控/热管理）"
+        stage: "整理期"
+        style_position: "低中位"
+        priority: 2
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["300750", "002594"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+      rail_transit:
+        label: "轨道交通装备（高铁/城轨/磁浮）"
+        stage: "整理期"
+        style_position: "低位"
+        priority: 2
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["601766"]
+        sector_20d_pct: null
+        catalyst_quality: null
+        last_updated: "2026-06-01"
+
+# ============================================================
+# 周校准指标映射（每周花3分钟核对，用市场数据覆盖AI叙事）
+# ============================================================
+#
+# 使用规则：
+#   当ETF信号与stage标签冲突时，相信市场信号，手动更新stage
+#   ETF > MA20 + 净申购为正  → 支持 启动期/主升期
+#   ETF 跌破MA20             → 降级为 整理期
+#   ETF 跌破MA60             → 降级为 调整期
+#
+# 每周校准步骤（建议周日晚）：
+#   1. 查各ETF收盘价 vs MA20/MA60（同花顺/Choice）
+#   2. 查ETF近5日净申购（天天基金"资金流向"页面）
+#   3. 查龙头股 vs 上证的相对强弱（涨幅对比）
+#   4. 若发现矛盾 → 修改对应subsector的stage字段
+#
+# ETF代码说明：部分ETF存在多只，以下为主流流动性较好版本，
+# 使用前建议在同花顺确认代码有效性。
+#
+weekly_calibration:
+  last_calibrated: "2026-06-08"
+  calibration_rule: "信号股20日超额(vs创业板ETF159915)：≥+8%=主升；+2~+8%=整理；-5~+2%=边界；≤-5%=调整"
+
+  sectors:
+
+    semiconductor_hbm:
+      label: "HBM产业链/先进封装"
+      linked_subsectors: ["hbm_ecosystem", "packaging_advanced"]
+      etf: "512480"
+      etf_name: "半导体ETF(华夏)"
+      signal_stock: "002156"
+      signal_stock_name: "通富微电"
+      current_stage: "主升期"
+      last_verified: null
+
+    pcb_ai_server:
+      label: "AI服务器PCB/覆铜板"
+      linked_subsectors: ["pcb_ai_server"]
+      etf: "512760"
+      etf_name: "电子ETF(国联)"
+      signal_stock: "002463"
+      signal_stock_name: "沪电股份"
+      current_stage: "主升期"
+      last_verified: null
+
+    ai_infra:
+      label: "AI算力基础设施(服务器整机)"
+      linked_subsectors: ["ai_infra"]
+      signal_stock: "601138"
+      signal_stock_name: "工业富联"
+      current_stage: "主升期"
+      last_verified: "2026-06-08"
+      verified_note: "工业富联20日超额+13.3%，升级主升期"
+
+    optical_module:
+      label: "光模块/CPO/硅光"
+      linked_subsectors: ["optical_module_cpo"]
+      etf: "159869"
+      etf_name: "通信ETF(鹏华)"
+      signal_stock: "300308"
+      signal_stock_name: "中际旭创"
+      current_stage: "主升期"
+      last_verified: "2026-06-07"
+      verified_note: "旭创现价1179，已破千元创新高，确认主升期；周五-7.8%为美股冲击，非趋势逆转"
+
+    passive_components:
+      label: "被动元件(MLCC)"
+      linked_subsectors: ["passive_components"]
+      etf: "512760"
+      etf_name: "电子ETF(国联)"
+      signal_stock: "300408"
+      signal_stock_name: "三环集团"
+      current_stage: "过热期"
+      last_verified: "2026-06-07"
+      verified_note: "三模型一致：88%涨幅，估值分位95-99.6%，不追高，等消化"
+
+    robotics_parts:
+      label: "人形机器人核心零部件"
+      linked_subsectors: ["humanoid_parts"]
+      signal_stock: "300124"
+      signal_stock_name: "汇川技术"
+      current_stage: "整理期"
+      last_verified: "2026-06-08"
+      verified_note: "汇川技术20日超额-2.3%，降级整理期"
+
+    power_grid_hvdc:
+      label: "特高压/换流阀"
+      linked_subsectors: ["power_grid", "hvdc_transmission"]
+      etf: "159726"
+      etf_name: "电力ETF(广发)"
+      signal_stock: "600089"
+      signal_stock_name: "特变电工"
+      current_stage: "调整期"
+      last_verified: "2026-06-06"
+      verified_note: "特变电工60日-21.5%，ETF跌破MA20确认调整"
+
+    nuclear_power:
+      label: "核电/SMR"
+      linked_subsectors: ["nuclear_power", "power_nuclear"]
+      signal_stock: "601985"
+      signal_stock_name: "中国核电"
+      current_stage: "整理期"
+      last_verified: "2026-06-08"
+      verified_note: "中国核电20日超额-1.4%，降级整理期"
+
+    energy_storage:
+      label: "储能系统"
+      linked_subsectors: ["energy_storage"]
+      signal_stock: "300750"
+      signal_stock_name: "宁德时代"
+      current_stage: "调整期"
+      last_verified: "2026-06-08"
+      verified_note: "宁德时代20日超额-8.9%，降级调整期"
+
+    commercial_space:
+      label: "商业航天/卫星互联网"
+      linked_subsectors: ["commercial_space", "satellite_comms"]
+      signal_stock: "600118"
+      signal_stock_name: "中国卫通"
+      current_stage: "调整期"
+      last_verified: "2026-06-08"
+      verified_note: "中国卫通20日超额-26%，降级调整期；卫星-33.5%距高点，第一波结束"
+
+    innovative_drug:
+      label: "创新药"
+      linked_subsectors: ["innovative_drug"]
+      signal_stock: "600276"
+      signal_stock_name: "恒瑞医药"
+      current_stage: "调整期"
+      last_verified: "2026-06-08"
+      verified_note: "恒瑞医药20日超额-11.2%，降级调整期；β行情2025年已结束"
+
+    wind_power:
+      label: "风电设备"
+      linked_subsectors: ["wind_power_equipment"]
+      signal_stock: "002202"
+      signal_stock_name: "金风科技"
+      current_stage: "调整期"
+      last_verified: "2026-06-08"
+      verified_note: "金风科技20日超额-17.5%，降级调整期；装机催化已兑现"
+
+# ============================================================
+# 观察池（有突破信号时升级进主线）
+# ============================================================
+watch_pool:
+  - name: "低空经济"
+    reason: "首波运行后消化期，等eVTOL商业化落地信号触发第二波"
+  - name: "固态电池"
+    reason: "量产2028+，2026仅为概念/样品年，只做事件驱动短波段"
+  - name: "储能"
+    reason: "行业增长但价格战压利润，无明确个股α，除非出海大单刺激"
+  - name: "商业航天"
+    reason: "发射事件驱动弹性好，但收入变现远，不适合中线底仓"
+
+# ============================================================
+# 防御池（收缩期扩展规则7豁免，允许分析持有）
+# ============================================================
+defense_pool:
+  high_dividend:
+    description: "红利/高股息ETF及个股"
+    stocks:
+      - "510880"   # 红利ETF
+      - "600900"   # 长江电力
+      - "601088"   # 中国神华
+  banking:
+    description: "大型银行"
+    stocks:
+      - "600036"   # 招商银行
+      - "601398"   # 工商银行
+  utilities:
+    description: "公用事业"
+    stocks:
+      - "600900"   # 长江电力
+      - "600025"   # 华能水电
+
+# ============================================================
+# 市场整体状态
+# ============================================================
+current_temperature: "偏热"   # 偏冷/常温/偏热/极热
+sh300_weekly_change: 0        # 沪深300近一周涨跌幅%，每周手动更新
+
+recent_catalysts:
+  - sector: "AI算力"
+    subsector_key: "ai_chip"
+    event: "黄仁勋陪同特朗普访华，英伟达对华供货预期改善"
+    date: "2026-05-14"
+  - sector: "算电协同"
+    subsector_key: "power_grid"
+    event: "国常会六张网政策，电网投资加速"
+    date: "2026-05-11"
+  - sector: "算电协同"
+    subsector_key: "power_ups_cooling"
+    event: "四部门AI与能源双向赋能方案"
+    date: "2026-05-08"
+  - sector: "AI算力互联链"
+    subsector_key: "pcb_ai_server"
+    event: "AI服务器高速PCB板块多股涨停，胜宏科技/深南电路等确认主升启动"
+    date: "2026-05-27"
+  - sector: "半导体HBM"
+    subsector_key: "hbm_ecosystem"
+    event: "长鑫存储IPO已过会进入注册程序（5/27落地），通富微电HBM独家封测逻辑强化；下一催化节点：注册批文/正式招股/H2 DRAM继续涨价。注意：上会利好已兑现，短期防见光回踩。"
+    date: "2026-05-27"

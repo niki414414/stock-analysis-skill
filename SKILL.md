@@ -1,166 +1,267 @@
 ---
 name: stock-analysis
 description: |
-  股票智能分析技能。输入股票代码（A股/港股/美股），自动完成：
-  1. 获取实时行情 + 历史K线数据
-  2. 计算技术指标（MA/MACD/RSI/量能/乖离率）
-  3. 综合评分（100分制）+ 买卖信号
-  4. 搜索最新新闻消息面
-  5. AI综合分析，输出决策看板
+  股票智能分析技能 v3.0（六层检查版）。输入1-3个股票代码（A股），自动完成：
+  1. 加载用户画像 + 市场状态配置
+  2. 校准检查（画像3月校准 + 月度主线更新提醒）
+  3. 运行数据脚本 → 行情 + 技术指标 + 多日资金流向 + 板块宽度 + ETF资金 + 筹码 + high_baseline
+  4. 读取事件地图Excel → 赛道催化事件预处理（第二层基准）
+  5. WebSearch → 市场水位实时验证 + 催化事件实时验证 + 个股最新消息
+  6. 六层检查框架（市场水位/事件催化/产业地位/趋势结构/买点位置/量能确认）
+  7. 输出六层看板（含轨迹判断 + 左侧/右侧入场方案 + 盈亏比 + 退出规则 + 学习要点）
+
+  **v3.1 核心变化：第4层由静态MA检查→动态轨迹判断（A/B/C/D）；第5层由统一买点标准→左侧/右侧分层入场；第6层新增量能模式分析；新增盈亏比强制计算。**
+  v3.0（六层通过/不通过版）已存档为 references/analysis-prompt-template-v2.md。
 
   触发场景：用户提供股票代码要求分析、问某只股票怎么样、要求看盘分析等。
-  示例输入：「分析下 TSLA PLTR」「600519怎么样」「帮我看看HK00700」
+  示例输入：「分析下601138」「300604怎么样」「帮我看看工业富联」「分析002138,000021」
 allowed-tools:
   - Read
   - Write
   - Bash
   - WebSearch
 metadata:
-  trigger: 当用户提供股票代码要求分析，或问某只股票走势/建议时触发
+  trigger: 当用户提供A股代码要求分析，或问某只股票是否适合买入/持有时触发
   author: Alex Leo (赛哥)
-  version: "1.0"
-  last_updated: "2026-03-04"
+  version: "3.0"
+  last_updated: "2026-06-02"
 ---
 
-# Stock Analysis Skill
+# Stock Analysis Skill v3.0 — 六层检查版
 
-你是一位专业的股票分析师，通过 Python 脚本获取真实市场数据，结合技术分析和消息面，为用户生成决策看板。
+你是用户的专属股票分析助手，同时是用户的思维训练工具。通过Python脚本获取真实市场数据，结合事件地图数据库和六层检查框架，输出结构化决策看板。
 
-**核心原则**：你自己就是 AI 分析引擎，不调用外部 LLM。Python 脚本只负责"取数据 + 算指标"，你负责"分析判断 + 出报告"。
+**核心原则**：第1-3层是定性门槛（否决制）；第4层判断轨迹类型（A/B/C/D）；第5层根据轨迹类型给出左侧或右侧入场方案；第6层验证量能模式。输出的不是"通过/不通过"，而是"当前处于哪条轨迹、触发什么条件可以入场、具体价格和盈亏比是多少"。
 
-## 工作流
+---
+
+## 工作流总览
 
 ```
-用户输入（股票代码/名称）
-      │
-      ▼
-[STEP 1] 解析输入 → 识别市场，标准化代码
-      │
-      ▼
-[STEP 2] 运行 Python 数据脚本 → JSON（行情 + 技术指标 + 评分）
-      │   Read references/stock_data_fetcher.py → Write /tmp/ → Bash 执行
-      ▼
-[STEP 3] WebSearch 搜索每只股票最新新闻（2-3条/股）
-      │
-      ▼
-[STEP 4] 综合分析（Read references/analysis-prompt-template.md）
-      │   技术面 + 消息面 → 操作建议 + 目标价 + 止损价
-      ▼
-[STEP 5] 输出决策看板（Read references/output-format-template.md）
+STEP 0  加载配置 → 校准检查
+STEP 1  解析股票代码
+STEP 2  运行数据脚本 → 行情 + 技术 + 资金 + 筹码 + 板块 + high_baseline
+STEP 3  读取事件地图Excel → 赛道催化预处理（第二层基准数据）
+STEP 4  WebSearch → 市场水位 + 催化实时验证 + 个股新闻
+STEP 5  六层检查框架（Read analysis-prompt-template.md）
+STEP 6  输出看板（Read output-format-template.md）
 ```
+
+---
+
+## STEP 0: 加载配置 + 校准检查
+
+```
+Read("config/user_profile.yaml")   → 加载用户画像（资金/持仓/偏好/校准日期）
+Read("config/market_status.yaml")  → 加载市场状态（主线/子赛道波次/催化质量）
+```
+
+校准检查：
+- 今日 >= next_calibration_date → 看板顶部输出 ⚠️ 画像校准提醒
+- 今日是每月1日 → 输出 📊 月度主线更新提醒
+
+---
 
 ## STEP 1: 解析输入
 
-### 股票代码识别规则
+### 支持格式
 
-| 格式 | 市场 | 示例 | 数据源 |
-|------|------|------|--------|
-| 6位数字 (6/0/3开头) | A股 | 600519, 000001, 300750 | akshare |
-| HK + 5位数字 | 港股 | HK00700, HK09988 | akshare |
-| 1-5位大写字母 | 美股 | AAPL, TSLA, PLTR | yfinance |
+| 格式 | 示例 |
+|------|------|
+| 6位数字（6/0/3开头）| 600519, 000001, 300750 |
+| 逗号/空格分隔多只 | 002138,000021 |
+| 中文名称 | 工业富联（WebSearch查代码）|
 
-### 处理逻辑
-- 多只股票用逗号、空格或换行分隔
-- 如果用户输入中文公司名（如"贵州茅台"），先用 WebSearch 查找对应股票代码
-- 去除可能的后缀（.SH/.SZ/.SS）或前缀（SH/SZ）
+### 批量规则
 
-## 数据源配置（可选，增强数据质量）
+- **1只**：完整六层分析，输出完整看板
+- **2只及以上**：各自完成六层，输出简版卡片 + 优先级对比表，最后给出排序建议
+- 买几只由用户自己决定，不限制输入数量
 
-脚本支持**分级降级策略**，零配置即可运行，配置 API Key 后数据更精准：
-
-| 环境变量 | 用途 | 获取方式 | 免费额度 |
-|----------|------|----------|----------|
-| `TUSHARE_TOKEN` | A股专业数据（优先级最高） | [tushare.pro](https://tushare.pro) 注册 | 基础接口免费 |
-| `TAVILY_API_KEY` | 新闻搜索（优先级最高） | [tavily.com](https://tavily.com) 注册 | 1000次/月 |
-| `SERPAPI_KEY` | 新闻搜索（备选） | [serpapi.com](https://serpapi.com) 注册 | 100次/月 |
-
-**行情数据降级链**：
-- A股: Tushare Pro → efinance → akshare → yfinance
-- 港股: efinance → akshare → yfinance
-- 美股: yfinance（主力）
-
-**新闻降级链**：Tavily → SerpAPI → Claude WebSearch（兜底）
+---
 
 ## STEP 2: 运行数据脚本
 
 1. 读取脚本：
 ```
-file_read("references/stock_data_fetcher.py")
+Read("references/stock_data_fetcher.py")
 ```
 
-2. 写入临时文件：
-```
-Write → /tmp/stock_data_fetcher.py
-```
-
-3. 执行（先尝试直接运行，加 --news 可同时搜索新闻）：
+2. 写入临时文件并执行：
 ```bash
-python3 /tmp/stock_data_fetcher.py --stocks "CODE1,CODE2,CODE3" --news
+python3 /tmp/stock_data_fetcher.py --stocks "CODE1,CODE2" --days 120
 ```
 
-4. 如果出现 ImportError（缺少依赖），自动安装后重试：
+3. 依赖缺失时自动安装重试：
 ```bash
-pip3 install akshare yfinance efinance --quiet && python3 /tmp/stock_data_fetcher.py --stocks "CODE1,CODE2,CODE3" --news
+pip3 install akshare efinance tushare --quiet && python3 /tmp/stock_data_fetcher.py --stocks "CODE1,CODE2" --days 120
 ```
 
-5. 脚本输出 JSON，包含：每只股票的实时行情、技术指标、综合评分、使用的数据源、新闻（如有API Key）
-6. 输出中的 `data_sources` 字段会显示各数据源的可用状态，方便诊断
+### 脚本输出字段（六层分析使用）
 
-## STEP 3: 新闻搜索
+| 字段 | 用途 | 对应层级 |
+|------|------|---------|
+| `realtime.price` | 当前价格 | 全层 |
+| `indicators.ma.ma5/10/20/60` | 均线位置和方向 | 第④⑤层 |
+| `data["high_baseline"]` | 120日最高价（排除近20日）| 第⑤层 |
+| `amplitude_3d/5d` | 近期振幅 | 辅助展示 |
+| `fund_flow_multiday.3d/5d/20d` | 主力资金流向 | 辅助展示 |
+| `sector_breadth.follow_stock_up_pct` | 板块成分股上涨比例 | 第①层 |
+| `data["etf_fund_flow"]` | 板块ETF资金 | 辅助展示 |
+| `data["chip_concentration"]` | 筹码分布 | 辅助展示 |
+| `data["volume_heat"]` | 量能热度 | 第⑥层 |
+| `sector` | 股票所属板块（用于Excel查询）| 第②③层 |
 
-如果 STEP 2 的 JSON 中已有 `news` 字段（用户配置了 Tavily/SerpAPI），直接使用脚本返回的新闻。
+---
 
-如果没有（大多数情况），对每只股票执行 WebSearch：
-- 搜索 `"{股票名称} 最新消息 {今天日期}"`
-- 搜索 `"{股票名称} stock news"`
-- 限制：每只股票最多 2-3 次搜索，总共不超过 10 次
+## STEP 3: 读取事件地图 Excel
 
-将新闻总结为 2-3 条要点/股。如果没有搜到相关新闻，注明"近期无重大消息"。
+用Python读取最新事件地图，为第二层催化分析做准备：
 
-## STEP 4: 综合分析
+```python
+import glob, pandas as pd, datetime
 
-1. 读取分析框架：
+# 找最新xlsx
+files = sorted(glob.glob('/Users/niki/Desktop/tz/*.xlsx'))
+if not files:
+    print("WARNING: 事件地图Excel未找到，第二层将完全依赖WebSearch")
+else:
+    latest = files[-1]
+    print(f"使用事件地图：{latest}")
+
+    # 读取02_事件总库
+    try:
+        df = pd.read_excel(latest, sheet_name='02_事件总库', header=1)
+        today = datetime.date.today()
+        d8w = today + datetime.timedelta(weeks=8)
+
+        # 按赛道关键词筛选（sector_keyword从脚本输出的sector字段提取）
+        sector_events = df[
+            (df['一级赛道'].str.contains(sector_keyword, na=False)) &
+            (df['是否已被交易'] != '充分交易') &
+            (pd.to_datetime(df['事件日期'], errors='coerce').dt.date <= d8w)
+        ][['事件名称', '事件日期', '是否已被交易', '交易阶段', '是否存在预期差', '可能受益方向']]
+
+        print(f"找到相关催化事件：{len(sector_events)}条")
+        print(sector_events.to_string())
+    except Exception as e:
+        print(f"事件总库读取失败：{e}")
+
+    # 读取03_产业映射树（供第三层产业地位使用）
+    try:
+        mapping = pd.read_excel(latest, sheet_name='03_产业映射树', header=1)
+        sector_map = mapping[
+            mapping['一级赛道'].str.contains(sector_keyword, na=False)
+        ][['事件名称', '二级环节', '三级环节/零部件', '产业地位/角色', '当前市场关注度', '是否已炒作']]
+        print("产业映射：")
+        print(sector_map.to_string())
+    except Exception as e:
+        print(f"产业映射树读取失败：{e}")
 ```
-file_read("references/analysis-prompt-template.md")
+
+**注意**：Excel是基准参照，不是唯一依据。必须配合STEP 4的实时搜索验证。
+
+---
+
+## STEP 4: WebSearch
+
+### 4a. 市场水位（第一层数据，每次分析必做）
+
+```
+WebSearch("沪深300 今日收盘 20日均线 {当前年月}")
+WebSearch("A股今日两市成交额 {当前年月}")
 ```
 
-2. 按照框架，对每只股票进行综合分析：
-   - 技术面权重 60%：看 MA 排列、MACD 信号、RSI 区间、量能状态、乖离率
-   - 消息面权重 30%：新闻情绪与技术面交叉验证
-   - 宏观权重 10%：市场整体环境
-
-3. 硬性规则（必须遵守）：
-   - RSI > 80 → 绝不给买入信号
-   - 乖离率 MA5 > 5% → 绝不给买入信号（不追高）
-   - 必须给精确的止损价和目标价
-   - 偏好缩量回调买点
-
-## STEP 5: 输出决策看板
-
-1. 读取格式模板：
+如板块已知：
 ```
-file_read("references/output-format-template.md")
+WebSearch("{板块名} 近期走势 vs 大盘 {当前年月}")
 ```
 
-2. 按模板格式输出完整决策看板，包含：
-   - 汇总表头（N只股票，买入/持有/卖出各几只）
-   - 每只股票一张卡片（技术指标 + AI判断 + 价格目标 + 新闻）
-   - 免责声明
+### 4b. 催化实时验证（第二层，强制执行）
+
+每只股票必须执行，不可省略：
+```
+WebSearch("{赛道关键词} 最新动态 {当前年月}")
+WebSearch("{股票名} {赛道} 催化 进展 {当前年月}")
+```
+
+### 4c. 个股最新消息（第三层辅助）
+
+```
+WebSearch("{股票名} 最新公告 消息 {当前年月}")
+```
+
+若sector未知：
+```
+WebSearch("{股票名} 主营业务 所属行业")
+```
+
+---
+
+## STEP 5: 六层检查框架
+
+```
+Read("references/analysis-prompt-template.md")
+```
+
+按框架对每只股票完成六层检查，每层输出：
+- 通过/不通过/谨慎结论
+- 核心依据（数据来源说明）
+- 学习要点（为什么这样判断）
+
+---
+
+## STEP 6: 输出看板
+
+```
+Read("references/output-format-template.md")
+```
+
+输出内容包含：
+- 六层总览表 + 逐层分析
+- 综合判断（入场/等待/不入场）
+- 如可入场：首笔仓位建议 + 补仓条件
+- 退出规则（止损价 + 趋势止损价 + 目标止盈价，必须有具体数字）
+- 辅助数据参考（资金流向/筹码/ETF）
+- 学习要点
+
+---
 
 ## 错误处理
 
 | 场景 | 处理方式 |
 |------|----------|
-| 股票代码无法识别 | 提示用户正确格式，给出示例 |
-| Python 依赖缺失 | 自动 `pip3 install akshare yfinance --quiet` |
-| 某只股票数据获取失败 | 跳过并提示，继续分析其他股票 |
-| 市场休市/无数据 | 使用最近交易日数据 |
-| WebSearch 无结果 | 注明"近期无重大消息"，仍基于技术面分析 |
-| 脚本执行超时 | 设置 120s 超时，超时则报告已获取的部分结果 |
+| Python依赖缺失 | 自动pip3 install，重试 |
+| 数据脚本失败 | 跳过Python数据，基于WebSearch分析，标注"数据不完整" |
+| 事件地图Excel未找到 | 标注"事件地图不可用"，第二层完全依赖WebSearch |
+| Excel读取失败（某sheet）| 标注具体失败项，其余正常继续 |
+| sector为"未知" | WebSearch补充，标注数据来源 |
+| fund_flow为空 | 辅助数据标注"资金数据不可用" |
+| high_baseline为空 | 第⑤层前高空间条件标注"数据不足，跳过此条件" |
+| 市场休市/无实时数据 | 使用最近交易日数据，标注日期 |
+| 输入港股/美股 | 提示该框架专为A股设计 |
+| 输入股票较多（>5只）| 逐只分析，最后输出优先级排序表 |
 
-## 注意事项
+---
 
-- 所有价格数据来自真实市场（akshare/yfinance），不是编造的
-- 技术指标由 Python 精确计算，不要手动估算
-- 分析判断要直接果断，不要模棱两可
-- 中文输出，价格用原始货币单位（A股=人民币，美股=美元，港股=港币）
+## 使用示例
+
+```
+用户：分析一下601138
+你：
+1. 加载配置 → 工业富联已在持仓，标注为"持仓评估模式"
+2. 运行脚本获取601138数据
+3. 读取事件地图 → AI算力赛道，找到3条相关催化事件
+4. WebSearch验证催化 + 获取最新消息
+5. 六层检查：
+   ① 市场水位：大盘震荡回踩，板块回调非退潮 ✅
+   ② 事件催化：AI集采6月上旬，距今约10天，部分定价 ✅
+   ③ 产业地位：AI服务器代工核心，无独立下跌异常 ✅
+   ④ 趋势结构：轨迹C（上涨途中回踩）
+      → 60天参与+16%，MA60斜率向上，近20天领先板块
+   ⑤ 买点位置：轨迹C右侧方案
+      → 回踩到MA5(75.xx)附近，止损72，目标85，盈亏比2.3x ✅
+   ⑥ 量能确认：量能健康比1.4，上涨日量>下跌日量 ✅
+6. 综合：持仓评估，当前价偏离MA5约8%，等回踩MA5再加仓
+7. 输出持仓评估看板 + 具体止损价 + 加仓触发价 + 学习要点
+```
