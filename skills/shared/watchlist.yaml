@@ -1,0 +1,59 @@
+# watchlist.yaml — 持仓 + 观察仓
+# status: holding=持仓 / watching=观察候选 / closed=已清仓
+# stop_loss: 触发止损提醒的价格（跌破时推送）
+# target: 目标价/止盈参考
+# last_updated: 2026-06-03
+
+# ══════════════════════════════════════════
+# 持仓（3只）
+# ══════════════════════════════════════════
+holdings:
+
+  - code: "601138"
+    name: "工业富联"
+    status: holding
+    cost_price: 51.00
+    shares: 300
+    cost_total: 15300
+    stop_loss: 68.00       # 跌破此价推送止损警报（-16%保护浮盈）
+    theme: "AI算力/ai_infra"
+    note: "AI服务器核心供应链，第一重仓，浮盈+59%"
+
+  - code: "600176"
+    name: "中国巨石"
+    status: holding
+    cost_price: 38.78
+    shares: 100
+    cost_total: 3878
+    stop_loss: 35.50       # 跌破成本-8.5%推送
+    theme: "PCB材料上游/玻纤"
+    note: "玻璃纤维，PCB基材上游，小仓试水"
+
+  - code: "600312"
+    name: "平高电气"
+    status: holding
+    cost_price: 21.382
+    shares: 100
+    cost_total: 2138
+    stop_loss: 19.50       # 跌破成本-8.8%推送
+    theme: "特高压/hvdc_transmission"
+    note: "特高压开关设备，算电协同方向，当前小幅亏损"
+
+# ══════════════════════════════════════════
+# 观察仓（待补充，缩圈后加入）
+# ══════════════════════════════════════════
+watching: []
+
+# ══════════════════════════════════════════
+# 已清仓（历史记录，复盘用）
+# ══════════════════════════════════════════
+closed:
+  - code: "002156"
+    name: "通富微电"
+    status: closed
+    note: "卖飞，HBM封测逻辑对了但出手早"
+
+  - code: "002475"
+    name: "立讯精密"
+    status: closed
+    note: "卖飞，精密制造方向"

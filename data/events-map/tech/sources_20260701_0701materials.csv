@@ -1,0 +1,79 @@
+﻿来源ID,日期,来源类型,标题/内容,URL,对应事件,可靠性,使用方式,备注,更新时间
+SRC-20260615-001,2026-06-12,主流财经媒体,Global equity funds draw third weekly inflow; tech funds still attracted inflows despite dip,https://www.reuters.com/world/china/global-markets-flows-graphic-2026-06-12/,MKT-2026-001,A,市场结构/资金流,说明外盘不是单边崩溃，而是波动中仍有AI相关资金买入,2026-06-15
+SRC-20260615-002,2026-06-10,主流财经媒体,Oracle shares fell after AI CAPEX/debt/equity financing concerns,https://www.reuters.com/technology/oracle-beats-fourth-quarter-revenue-estimates-2026-06-10/,MKT-2026-001,A,市场结构/风险提示,AI基础设施开始被追问现金流与投资回报,2026-06-15
+SRC-20260615-003,2026-06,官方信息,NVIDIA Vera Rubin full production and Spectrum-X Ethernet Photonics,https://nvidianews.nvidia.com/news/vera-rubin-full-production-agentic-ai-factory,AI-2026-010,S,官方事实,Rubin/CPO生产验证的底层来源,2026-06-15
+SRC-20260615-004,2026-06,官方信息,Apple unveils next generation of Apple Intelligence/Siri AI,https://www.apple.com/jp/newsroom/2026/06/apple-unveils-next-generation-of-apple-intelligence-siri-ai-and-more/,AIAPP-2026-007,S,官方事实,WWDC26兑现，后续看硬件门槛,2026-06-15
+SRC-20260615-005,2026-06-15,主流财经媒体,PCB原材料涨价向整板传导，部分公司涨价函，AI服务器/高速交换机需求推动,https://www.21jingji.com/article/20260615/herald/b117d40599448a98cebf72ba232e6758.html,PCB-2026-002,A,事件/产业影响,本周新增强分支,2026-06-15
+SRC-20260615-006,2026-06-09,主流财经媒体,创业板指反弹，半导体/PCB/CPO/先进封装等大涨,https://www.stcn.com/article/detail/3951245.html,PCB-2026-002,B,市场交易状态,反映A股科技线分歧后修复,2026-06-15
+SRC-20260615-007,2026-06-01,产业机构,TrendForce DRAM revenue and contract price forecasts,https://www.trendforce.com/presscenter/news/20260601-13070.html,MEM-2026-007,A,价格周期,存储价格周期依据,2026-06-15
+SRC-20260615-008,2026-05-19,券商辅导披露,中信证券关于长江存储上市辅导进展公告,https://www.cs.ecitic.com/newsite/tzgg/ipoqyfdgg/202605/t20260519_1212097.html,MEM-2026-008,S,辅导事实,长江存储IPO辅导硬事实,2026-06-15
+SRC-20260615-009,2026-04-27,官方信息,国家能源局预计2026迎峰度夏最大负荷15.75-16亿千瓦,https://www.nea.gov.cn/20260427/6d396d506d8d406e9f895a2d3b2266f0/c.html,POWER-2026-005,S,季节性事件,电力防守波段依据,2026-06-15
+SRC-20260615-010,2026-06-05,港交所/媒体,基本半导体第三次递表港交所,https://www1.hkexnews.hk/app/appindex.html,SIC-2026-001,A,观察级事件,SiC链入观察，不升为当前主线,2026-06-15
+SRC-20260615-011,2026-06,主流财经媒体,商业航天IPO/试射/星座组网进展,https://www.stcn.com/article/detail/3954729.html,SPACE-2026-001,A,12个月前瞻,商业航天纳入前瞻,2026-06-15
+SRC-20260617-001,2026-02-24,产业媒体/调研机构,Samsung Electro-Mechanics reportedly weighs double-digit MLCC price hike amid AI demand,https://www.trendforce.com/news/2026/02/24/news-samsung-electro-mechanics-reportedly-weighs-double-digit-mlcc-price-hike-in-april-amid-ai-demand/,MLCC-2026-001,A,MLCC涨价与AI需求验证,用于MLCC事件来源；后续可继续补充涨价函与交期来源,2026-06-17
+SRC-20260617-002,2026-04-29,行业协会,SEMI reports worldwide silicon wafer shipments increased 13% year-on-year in Q1 2026,https://www.semi.org/en/semi-press-release/semi-reports-worldwide-silicon-wafer-shipments-increase-13-percent-year-on-year-in-q1-2026,WAFER-2026-001,S,硅片需求恢复与AI驱动背景验证,用于半导体大硅片事件来源,2026-06-17
+SRC-20260617-003,2025-10-28,公司公告/官网,西安奕材成功登陆科创板，股票代码688783，12英寸硅片业务,https://www.eswin.com/news/newsinfo/139.html,FWD-20260617-020,A,修正西安奕材不是待IPO，而是上市后产能爬坡跟踪,用于forward事件纠偏,2026-06-17
+SRC-20260617-004,2026-06-16,产业媒体,"TSMC reportedly teams with Ibiden, Innolux to push CoPoS and glass substrates",https://www.digitimes.com/news/a20260616PD217/tsmc-innolux-ibiden-packaging-cowos.html,GLASS-2026-001,B,事件催化/产业化验证,用于确认玻璃基板/CoPoS产业化推进，仍需后续官方或客户订单验证,2026-06-17
+SRC-20260617-005,2026-06-17,主流财经媒体,西电电力电子成功斩获海外数据中心专用固态变压器订单，4台13.8kV AC/800V DC SST,https://finance.sina.com.cn/7x24/2026-06-17/doc-inicsmhx7169359.shtml,POWER-DC-2026-002,A-,事件触发,用于确认SST海外数据中心订单，但收入占比仍需公司后续披露,2026-06-17
+SRC-20260617-006,2026-06-08,官方新闻,Amazon announces multibillion-dollar agreement with Corning to supply optical fiber/cable/connectivity for data centers,https://www.aboutamazon.com/news/company-news/amazon-corning-fiber-optics-1000-jobs-north-carolina,FIBER-2026-001,A,事件触发/订单验证,用于确认AI数据中心光纤光缆需求加速和长协趋势,2026-06-17
+SRC-20260617-007,2026-03-31,官方公告,NVIDIA AI Ecosystem Expands as Marvell Joins Forces Through NVLink Fusion; NVIDIA invests $2 billion in Marvell,https://investor.nvidia.com/news/press-release-details/2026/NVIDIA-AI-Ecosystem-Expands-as-Marvell-Joins-Forces-Through-NVLink-Fusion/default.aspx,CONNECT-2026-001,A,技术路线/产业催化,用于确认连接芯片和NVLink Fusion生态事件,2026-06-17
+SRC-20260617-008,2026-06-04,官方/央视,工信部组织开展6G创新发展部省协同试点专项行动,https://news.cctv.com/2026/06/04/ARTI2lqI2uLdWCSQUwjpq3bt260604.shtml,SPACE-2026-001;FWD-20260617-031,A,政策前瞻,用于确认6G试点和卫星互联网/商业航天中长期关联,2026-06-17
+SRC-20260617-009,2026-06-12,主流财经媒体,长鑫科技IPO注册申请获证监会同意,https://finance.sina.com.cn/roll/2026-06-12/doc-iniceptn8815908.shtml,MEM-2026-005,A,状态更新,将长鑫科技状态从过会/待注册更新为注册获批/发行上市窗口临近,2026-06-17
+SRC-20260617-010,2026-06-09,市场媒体/报告转述,SemiAnalysis report cited delays in 800VDC/CPO and triggered market selloff,https://news.futunn.com/en/post/74356382/semianalysis-report-cited-delays-in-two-key-technologies-triggering-a,AI-2026-010;NPO-2026-001;POWER-DC-2026-002,B-,动态修正,仅作为市场扰动和技术节奏分歧，不作为已核实产业结论,2026-06-17
+SRC-20260617-011,2026-06-15,主流财经媒体/新华财经,多重因素催动六氟化钨价格较去年同期涨幅超200%,https://www.cls.cn/detail/2400326,WF6-2026-001,A-,涨价链来源,用于确认WF6涨价和国产替代窗口，后续需跟踪价格与长协,2026-06-17
+SRC-20260617-012,2026-05-31,官方发布,NVIDIA announces open humanoid robot reference design built on Isaac GR00T platform,https://nvidianews.nvidia.com/news/nvidia-open-humanoid-robot-reference-design,ROBOT-2026-002,A,技术催化/Physical AI,用于确认Physical AI/机器人参考设计催化,2026-06-17
+SRC-20260617-013,2026-05-31,官方发布,NVIDIA launches Cosmos 3 open frontier foundation model for Physical AI,https://nvidianews.nvidia.com/news/nvidia-launches-cosmos-3-the-open-frontier-foundation-model-for-physical-ai,ROBOT-2026-002,A,技术催化,用于确认Cosmos 3与Physical AI进展,2026-06-17
+SRC-20260617-014,2026-06-15,券商研报聚合,ABF膜供给趋紧，国产化替代前景向好,https://www.fxbaogao.com/detail/5479740,ABF-2026-001,B,行业观点/国产替代,辅助确认ABF膜供给趋紧和国产验证逻辑，需继续找一手来源,2026-06-17
+SRC-20260617-015,2026-06,待补,NPO/Scale-up光互连路线和MPO/FAU/保偏光纤测算,待补,NPO-2026-001,C,待核验,来自券商/产业材料转述，待官方路线图或客户订单交叉验证,2026-06-17
+SRC-20260617-016,2026-06,待补,晶圆代工涨价与成熟制程转单,待补,FAB-2026-001,C,待核验,涨价幅度和客户转单仍需公告、产业媒体或公司纪要确认,2026-06-17
+SRC-20260617-017,2026-06,待补,半导体/被动元件高端薄膜国产替代,待补,FILM-2026-001,C,待核验,小赛道观察级，需客户认证和量产数据,2026-06-17
+SRC-20260618-001,2026-06-18,用户上传材料,行业信息梳理：2026年3月31日至5月22日早期信号材料汇总,用户上传文件：行业信息梳理.txt,signals_early;GLASS-2026-001;PCB-2026-002;POWER-DC-2026-002;ROBOT-2026-002,C,早期信号/待核验材料,只作为线索，不直接作为事实入库；需后续官方/公告/主流媒体验证,2026-06-18
+SRC-20260618-002,2026-05-22,产业媒体,"BOE, Corning target glass substrates for AI chip packaging",https://www.digitimes.com/news/a20260521PD228/boe-packaging-corning-ai-chip-display.html,GLASS-2026-001,B,玻璃基板早期信号验证,订阅文章，只用于确认BOE-Corning三年MOU及玻璃基封装方向,2026-06-18
+SRC-20260618-003,2026-06-16,产业媒体,"TSMC reportedly teams with Ibiden, Innolux to push CoPoS, glass substrates",https://www.digitimes.com/news/a20260616PD217/tsmc-innolux-ibiden-packaging-cowos.html,GLASS-2026-001,B,玻璃基板/CoPoS后续验证,用于支撑CoPoS与玻璃基板产业化推进，但仍属验证期,2026-06-18
+SRC-20260618-004,2026-04-22,公司公告/新闻稿,GE Vernova reports first quarter 2026 financial results; gas turbine backlog and data center electrification orders,https://www.gevernova.com/news/press-releases/ge-vernova-reports-first-quarter-2026-financial,POWER-DC-2026-002;POWER-GT-2026-001,A,AIDC缺电/燃机/电气化需求验证,GE Vernova称预计2026年底至少110GW燃气轮机backlog+slot reservation，数据中心电气化订单强,2026-06-18
+SRC-20260618-005,2026-05-12,交易所/官方新闻稿,CME Group and Silicon Data Partner to Launch First Compute Futures,https://www.cmegroup.com/media-room/press-releases/2026/5/12/cme_group_and_silicondatapartnertolaunchfirstcomputefutures.html,AI-RENT-2026-001,A,算力金融化/compute futures前瞻验证,口径为partner to launch，不等同于已形成活跃交易市场,2026-06-18
+SRC-20260618-006,2026-05-28,主流财经媒体,"China works on AI token futures market, sources say, in race with US",https://www.reuters.com/world/china/china-works-ai-token-futures-market-sources-say-race-with-us-2026-05-28/,AI-RENT-2026-001,A-,Token金融化/算力定价观察,仍处研究/筹备阶段，不能写成已正式落地,2026-06-18
+SRC-20260618-007,2026-06-11,主流财经媒体,"AI boom and geopolitical tensions drive gas turbine demand, Siemens Energy says",https://www.reuters.com/business/energy/iran-war-adds-ai-boom-demand-gas-turbines-rises-further-siemens-energy-says-2026-06-11/,POWER-DC-2026-002;POWER-GT-2026-001,A,AIDC缺电与燃机需求验证,用于交叉验证海外燃机和数据中心电力需求强度,2026-06-18
+SRC-20260618-008,2026-06-17,用户上传框架,半导体轮动深化分析：从光模块单线主升到AI硬件全链条扩散,用户上传文件：半导体轮动分析_副本.pdf,reviews;weekly;signals_early,B-,历史框架基线,不保留仓位和买卖建议，只保留产业阶段、轮动顺序和监测指标,2026-06-18
+SRC-20260618-SW-001,2026-05-12,交易所公告,CME Group and Silicon Data partner to launch first compute futures,https://www.cmegroup.com/media-room/press-releases/2026/5/12/cme_group_and_silicondatapartnertolaunchfirstcomputefutures.html,TOKEN-2026-001;AI-RENT-2026-002,高,事实来源,用于算力金融化与compute futures，需注意为partner to launch，不等同于成熟流动性。,2026-06-18
+SRC-20260618-SW-002,2026-06-03,主流财经媒体,Big Tech 2026 AI capex plans summary,https://finance.yahoo.com/sectors/technology/article/meta-microsoft-amazon-and-alphabet-are-about-to-spend-a-shocking-amount-of-money-to-dominate-the-ai-era-115359575.html,AI-RENT-2026-002,中,背景来源,用于CSP Capex扩张节奏背景，后续应以公司季报/电话会逐项核验。,2026-06-18
+SRC-20260618-SW-003,2026-06-15,主流财经媒体,Salesforce to acquire autonomous AI agent platform Fin for about $3.6bn,https://www.reuters.com/business/salesforce-buy-fin-about-36-billion-2026-06-15/,AI-SAAS-2026-001;AI-AGENT-2026-001,高,事实来源,用于AI Agent/企业SaaS按场景并购和ARR验证。,2026-06-18
+SRC-20260618-SW-004,2026-05-05,公司/官方研究,"Microsoft 2026 Work Trend Index: agents, human agency and opportunity",https://www.microsoft.com/en-us/worklab/work-trend-index/agents-human-agency-and-the-opportunity-for-every-organization,AI-SAAS-2026-002;AI-AGENT-2026-001,高,事实/趋势来源,用于Copilot使用行为和企业AI应用需求验证。,2026-06-18
+SRC-20260618-SW-005,2026-04-15,行业研究机构,Gartner 2026 Hype Cycle for Agentic AI,https://www.gartner.com/en/articles/hype-cycle-for-agentic-ai,AI-AGENT-2026-001;AI-AGENT-2026-002,高,趋势来源,用于Agent成熟度、部署率与治理/安全/FinOps约束。,2026-06-18
+SRC-20260618-SW-006,2026-05-20,官方发布,"Google I/O 2026 announcements: models, agents and tools",https://blog.google/innovation-and-ai/technology/ai/google-io-2026-all-our-announcements/,AI-AGENT-2026-001;EDGE-AI-2026-001,高,发布会来源,用于端侧AI和Agent开发者生态催化。,2026-06-18
+SRC-20260618-SW-007,2026-05-19,官方发布,Google Android XR intelligent eyewear with Gemini,https://blog.google/products-and-platforms/platforms/android/android-xr-io-2026/,EDGE-AI-2026-002,高,发布会来源,用于AI眼镜/Android XR端侧入口。,2026-06-18
+SRC-20260618-SW-008,2025-09-08,产业研究机构,Counterpoint: AI Advanced PCs to surpass half of global shipments in 2026,https://counterpointresearch.com/en/reports/ai-advanced-pcs-to-surpass-half-of-global-shipments-in-2026,EDGE-AI-2026-001,中,趋势来源,用于AI PC渗透率背景，具体数据需后续订阅/跟踪。,2026-06-18
+SRC-20260618-SW-009,2026,产业研究机构,Omdia: AI glasses shipments forecast to exceed 10 million units by 2026,https://omdia.tech.informa.com/insights,EDGE-AI-2026-002,中,趋势来源,用于AI眼镜出货前瞻。,2026-06-18
+SRC-20260618-SW-010,2026-05,研究论文,EnterpriseRAG-Bench: enterprise internal knowledge benchmark,https://arxiv.org/abs/2605.05253,AI-AGENT-2026-002;AI-DATA-2026-001,中,技术/趋势来源,用于RAG/企业知识工程化和合成企业语料。,2026-06-18
+SRC-20260618-SW-011,2025-02,研究论文,Does Training with Synthetic Data Truly Protect Privacy?,https://arxiv.org/abs/2502.12976,AI-DATA-2026-001;AI-DATA-2026-002,中,风险来源,用于合成数据隐私保护风险提示。,2026-06-18
+SRC-20260618-SW-012,2026-05,研究论文,Securing the Agent: enterprise retrieval and tool-use isolation,https://arxiv.org/abs/2605.05287,AI-DATA-2026-002;AI-AGENT-2026-002,中,技术/风险来源,用于RAG/Agent权限和跨租户安全风险。,2026-06-18
+SRC-20260621-001,2026-06-17,官方公告,上交所发布《发行上市审核规则适用指引第10号——人工智能大模型企业适用科创板第五套上市标准》,https://www.stcn.com/article/detail/3967512.html,AIAPP-2026-008,A,events主事件,,2026-06-21
+SRC-20260621-002,2026-06-13,主流财经媒体,Claude Fable 5全球禁用，智谱GLM-5.2全量开放,https://finance.sina.com.cn/jjxw/2026-06-13/doc-inichnkk9388991.shtml,AIAPP-2026-009,A,events主事件,,2026-06-21
+SRC-20260621-003,2026-06-18,官方公告,商务部等八部门《关于加快'人工智能+消费'发展的实施意见》17条,https://www.news.cn/fortune/20260618/4bea2d9aa6e84b8db0d145ee3afbeb8e/c.html,EDGE-AI-2026-003,A,events主事件,,2026-06-21
+SRC-20260621-004,2026-06-19,主流财经媒体,路透社独家：中国海关加强铟出口审查，北美买家审批时间延长,,SEMI-2026-005,A,events主事件,东吴计算机王紫敬做了详细产业链梳理,2026-06-21
+SRC-20260621-005,2026-06-20,券商研究,摩根士丹利：功率半导体供给驱动型上行周期，全球分立器件4月同比+16%,,SEMI-2026-006,B,events+forward,扬杰科技为首选标的（仅作产业链定位参考）,2026-06-21
+SRC-20260621-010,,券商/KOL笔记,,待补,,,,综合多方券商调研和行业交流的市场笔记，信息密度高但含券商测算和非公开数据，需交叉验证。兆易Q2=50亿数字与公开预测差距大。,
+SRC-20260621-011,,券商研报,,待补,,,,CCL定量化测算含建滔调研数据(5月利润80元/张)和价格路径(235→300),
+SRC-20260621-012,,券商研报,,待补,,,,基于路透社6/19报道的延展分析，铟供需量化数据引用Yole,
+SRC-20260624-001,2026-06-23,券商研报,,,,C,,多家券商同步覆盖，涨价函为可验证事实,
+SRC-20260624-002,2026-06-24,媒体报道,,,,B,,Tim Culpan为知名科技分析师，彭博为主流财经媒体,
+SRC-20260624-003,2026-06-22/24,官方公告/展会,,,,A,,官方来源，可靠性最高,
+SRC-20260624-004,2026-06-23,外资研报,,,,B,,基于渠道调查，5月起供应链已察觉delay可能性,
+SRC-20260624-005,2026-06-23,券商研报,,,,B,,NV投资者关系部门正式澄清，黄仁勋亲自写邮件催货旭创/新易盛,
+SRC-20260629-001,,B级,,,,,,,
+SRC-20260629-002,,A级,,,,,,,
+SRC-20260629-003,,A级,,,,,,,
+SRC-20260629-004,,A级,,,,,,,
+SRC-20260629-005,,A级,,,,,,,
+SRC-20260629-006,,A级,,,,,,,
+SRC-20260629-007,,B级,,,,,,,
+SRC-20260629-008,,B级,,,,,,,
+SRC-20260629-009,,C级,,,,,,,
+SRC-20260630-001,,A级,,,,,,,
+SRC-20260630-002,,B级,,,,,,,
+SRC-20260630-003,,C级,,,,,,,
+SRC-20260701-001,,B级,,https://www.thepaper.cn/newsDetail_forward_33478426,,,,,
+SRC-20260701-002,,A级,,https://finance.sina.com.cn/tech/roll/2026-06-30/doc-inifehke3522581.shtml,,,,,
+SRC-20260701-003,,B级,,https://newsletter.mcj.vc/p/dg-matrix-investment-announcement,,,,,
+SRC-20260701-004,,C级,,,,,,,
+SRC-20260701-005,,B级,,,,,,,

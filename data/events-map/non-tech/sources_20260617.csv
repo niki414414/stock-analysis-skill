@@ -1,0 +1,26 @@
+﻿来源ID,事件ID,来源标题,来源类型,来源URL,引用要点,发布日期/检索日期
+SRC-001,COPPER-2026-001,证券时报：铜市库存迁移与AI用铜分歧,媒体/市场数据,https://www.stcn.com/article/detail/3926065.html,铜价、库存迁移、AI数据中心用铜需求和投行观点分歧。,2026-06
+SRC-002,LI-2026-001,Reuters：Energy storage boom strengthens demand outlook for lithium,国际媒体,https://www.reuters.com/sustainability/climate-energy/energy-storage-boom-strengthens-demand-outlook-beaten-down-lithium-2026-01-04/,储能需求改善锂需求前景，2026年锂需求和储能占比预期提升。,2026-01-05
+SRC-003,RARE-2026-001,商务部公告2025年第70号：暂停实施61/62号等公告,官方政策,https://macmap.org/OfflineDocument/USADMIN/Measure_Extraordinary_CHN_50.pdf,61/62号稀土相关公告暂停实施至2026-11-10。,2025-11-07
+SRC-004,AL-2026-001,国家统计局：2026年5月份规模以上工业增加值,官方数据,https://www.stats.gov.cn/sj/zxfb/202606/t20260616_1963953.html,原铝、十种有色金属、工业产品产量数据。,2026-06-16
+SRC-005,STOR-LFP-2026-001,EnergyTrend：中国能建2026年30GWh储能系统及电芯集采,行业信息,https://www.energytrend.cn/taxonomy/term/11225/,中国能建2026年度磷酸铁锂储能系统集中采购预估30GWh。,2026-06
+SRC-006,STOR-VRFB-2026-001,CNESA：储能央国企集采规模与长时储能信息,行业协会,https://www.cnesa.org/information/detail/?column_id=4&id=6719,央国企储能集采规模、长时储能项目线索。,2024-12-10
+SRC-007,SOLAR-2026-001,国家能源局：2026年1—4月份全国电力统计数据,官方数据,https://www.nea.gov.cn/20260525/c509435a0f09497cb3d2ca361fa262de/c.html,截至4月底全国装机39.9亿千瓦，太阳能12.5亿千瓦，风电6.6亿千瓦。,2026-05-25
+SRC-008,SOLAR-INV-2026-001,Reuters：EU curbs on Chinese inverters,国际媒体,https://www.reuters.com/business/energy/eu-curbs-chinese-inverters-risk-slowing-solar-rollout-over-security-fears-2026-06-11/,欧盟限制公共资金支持中国逆变器，影响新建光伏项目和系统成本。,2026-06-11
+SRC-009,WIND-2026-001,Reuters：中国5月火电因低风速上升,国际媒体,https://www.reuters.com/business/energy/chinas-fossil-fuelled-power-extends-rise-may-weak-wind-output-2026-06-16/,5月低风速影响风电，水电同比增长13%，总发电量同比增长。,2026-06-16
+SRC-010,HYDRO-2026-001,Reuters：中国5月水电发电同比增长13%,国际媒体,https://www.reuters.com/business/energy/chinas-fossil-fuelled-power-extends-rise-may-weak-wind-output-2026-06-16/,5月水电发电同比高增，迎峰度夏期间电力结构变化。,2026-06-16
+SRC-011,MINOR-TIN-2026-001,证券时报：算力金属价值重估,媒体/行业,https://www.stcn.com/article/detail/3942631.html,AI服务器、先进封装和光模块带动锡、铜等算力金属需求。,2026-06-04
+SRC-012,MINOR-W-2026-001,界面新闻：钨价重新走强，推高六氟化钨价格,媒体/行业,https://m.jiemian.com/article/14574625.html,钨精矿、钨粉价格和半导体六氟化钨成本传导。,2026-06
+SRC-013,MINOR-SB-2026-001,商务部、海关总署公告2024年第33号：锑等物项出口管制,官方政策,https://www.mofcom.gov.cn/zwgk/zcfb/art/2024/art_a4711acb06364199a3c5a06d7f2be6d8.html,锑相关物项自2024年9月15日起实施出口管制。,2024-08-15
+SRC-014,MINOR-GEIN-2026-001,人民网：多种小金属价格攀升,媒体/行业,https://finance.people.com.cn/n1/2026/0602/c1004-40732277.html,锗、镓、铟等小金属价格和应用需求。,2026-06-02
+SRC-015,MACH-EXPORT-2026-001,中国工程机械工业协会：2026年5月工程机械主要产品销售快报,行业协会,https://www.sohu.com/a/1032796476_122014422,1—5月挖掘机、装载机销量与出口高增。,2026-06-05
+SRC-016,MACH-ELECTRIC-2026-001,中国工程机械工业协会：电动装载机销量数据,行业协会,https://www.sohu.com/a/1032796476_122014422,1—5月电动装载机销量、出口增速。,2026-06-05
+SRC-017,MACH-MOTHER-2026-001,国家统计局：2026年5月份工业生产数据解读,官方数据,https://www.stats.gov.cn/sj/zxfbhjd/202606/t20260616_1963959.html,数控金属切削机床、机床数控装置、工业自动化核心部件产量高增。,2026-06-16
+SRC-018,BANK-DIV-2026-001,证券时报：上市银行年度分红密集落地,媒体/金融,https://finance.sina.com.cn/stock/relnews/cn/2026-06-16/doc-inicqnru6335086.shtml,上市银行分红总额、股息率和中期分红常态化。,2026-06-16
+SRC-019,BANK-NIM-2026-001,国家金融监督管理总局：2026年一季度监管指标,官方数据,https://www.nfra.gov.cn/cn/view/pages/ItemDetail.html?docId=1258013&itemId=915,商业银行净息差、不良率和资产规模数据。,2026-05-15
+SRC-020,SEC-MA-2026-001,证券时报：中金吸并东兴证券、信达证券股东会通过,媒体/公告汇总,https://www.stcn.com/article/detail/3952499.html,三家券商股东会审议通过换股吸收合并相关议案，后续仍待监管核准。,2026-06-10
+SRC-021,SEC-REFORM-2026-001,证监会：吴清主席在2026陆家嘴论坛主题演讲,官方监管,https://www.csrc.gov.cn/csrc/c106311/c7639684/content.shtml,支持并购重组、再融资改革、主动ETF、REITs等资本市场改革。,2026-06-17
+SRC-022,PHARMA-ASCO-2026-001,医药出海通：ASCO 2026中国创新药临床数据盘点,行业媒体,https://chinamedglobal.com/blog/asco-2026-china-innovative-drug-clinical-data-global-strategy,ASCO 2026中国创新药口头报告、ADC/双抗等数据披露。,2026-05-23
+SRC-023,PHARMA-BD-2026-001,医药出海/行业报道：中国创新药License-out活跃,行业媒体,https://www.cbpfcn.com/news/9124,2026年一季度中国创新药License-out交易活跃，MNC外部寻源需求增强。,2026-05-27
+SRC-024,PHARMA-PAY-2026-001,国家医保局：2025版医保目录和商保创新药目录,官方政策,https://www.nhsa.gov.cn/art/2025/12/7/art_14_18972.html,新增114种医保药品，首版商保创新药目录纳入19种药品并于2026年1月1日实施。,2025-12-07
+SRC-025,MACH-RENEW-2026-001,国家统计局：装备制造业和工业品出口保持增长,官方数据,https://www.stats.gov.cn/sj/zxfbhjd/202606/t20260616_1963959.html,装备制造业、专用设备出口和工业自动化数据验证设备更新方向。,2026-06-16

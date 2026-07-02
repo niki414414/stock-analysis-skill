@@ -114,52 +114,25 @@ pip3 install akshare efinance tushare --quiet && python3 /tmp/stock_data_fetcher
 
 ---
 
-## STEP 3: 读取事件地图 Excel
+## STEP 3: 查询事件地图（csv周报）
 
-用Python读取最新事件地图，为第二层催化分析做准备：
+调用脚本，为第二层催化分析和第三层产业地位判断做准备：
 
-```python
-import glob, pandas as pd, datetime
-
-# 找最新xlsx
-files = sorted(glob.glob('/Users/niki/Desktop/tz/*.xlsx'))
-if not files:
-    print("WARNING: 事件地图Excel未找到，第二层将完全依赖WebSearch")
-else:
-    latest = files[-1]
-    print(f"使用事件地图：{latest}")
-
-    # 读取02_事件总库
-    try:
-        df = pd.read_excel(latest, sheet_name='02_事件总库', header=1)
-        today = datetime.date.today()
-        d8w = today + datetime.timedelta(weeks=8)
-
-        # 按赛道关键词筛选（sector_keyword从脚本输出的sector字段提取）
-        sector_events = df[
-            (df['一级赛道'].str.contains(sector_keyword, na=False)) &
-            (df['是否已被交易'] != '充分交易') &
-            (pd.to_datetime(df['事件日期'], errors='coerce').dt.date <= d8w)
-        ][['事件名称', '事件日期', '是否已被交易', '交易阶段', '是否存在预期差', '可能受益方向']]
-
-        print(f"找到相关催化事件：{len(sector_events)}条")
-        print(sector_events.to_string())
-    except Exception as e:
-        print(f"事件总库读取失败：{e}")
-
-    # 读取03_产业映射树（供第三层产业地位使用）
-    try:
-        mapping = pd.read_excel(latest, sheet_name='03_产业映射树', header=1)
-        sector_map = mapping[
-            mapping['一级赛道'].str.contains(sector_keyword, na=False)
-        ][['事件名称', '二级环节', '三级环节/零部件', '产业地位/角色', '当前市场关注度', '是否已炒作']]
-        print("产业映射：")
-        print(sector_map.to_string())
-    except Exception as e:
-        print(f"产业映射树读取失败：{e}")
+```bash
+python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py events --sector {一级赛道}
+python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py mapping --sector {一级赛道} --keyword {细分环节/产品关键词}
+python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py forward --sector {一级赛道}
+python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py corrections
 ```
 
-**注意**：Excel是基准参照，不是唯一依据。必须配合STEP 4的实时搜索验证。
+- `events`：该赛道未充分交易的催化事件
+- `mapping`：该赛道在产业链中的环节和代表公司类型（第三层用）
+- `forward`：未来30/90天/12个月前瞻事件
+- `corrections`：本周修正清单（全市场，先看一遍避免依据过时判断）
+
+脚本自动取`~/Desktop/tz/科技产业事件/`下日期最新的`csvMMDD/`文件夹。
+
+**注意**：事件地图是基准参照，不是唯一依据。必须配合STEP 4的实时搜索验证。
 
 ---
 

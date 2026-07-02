@@ -1,0 +1,80 @@
+user_profile:
+  # === 基础信息 ===
+  name: "用户"
+  experience_level: "新手"
+  entry_date: "2026-03-01"
+
+  # === 资金信息（2026-06-11更新，两账户合计）===
+  total_capital_wan: 17.27   # 账户一5.36万 + 账户二11.91万（此前仅追踪账户一，6万的估算偏低）
+  target_capital_wan: 10     # 已超过原目标，需与用户确认是否上调
+  available_cash_wan: 13.45  # 账户一3.23万 + 账户二10.23万可用现金
+
+  # === 当前持仓（2026-06-11，两账户合计共6笔）===
+  current_holdings:
+    - code: "601138"
+      name: "工业富联"
+      account: "账户一"
+      shares: 300
+      cost: 51.912
+      role: "底舱"
+      max_shares: 500
+    - code: "600176"
+      name: "中国巨石"
+      account: "账户二"
+      shares: 100
+      cost: 38.784
+    - code: "600312"
+      name: "平高电气"
+      account: "账户二"
+      shares: 100
+      cost: 21.382
+    - code: "600886"
+      name: "国投电力"
+      account: "账户二"
+      shares: 100
+      cost: 14.181
+    - code: "510300"   # 300ETF，代码待核实
+      name: "300ETF"
+      account: "账户二"
+      shares: 1500
+      cost: 4.771
+    - code: "588000"   # 科创板50ETF，代码待核实
+      name: "科创50ETF"
+      account: "账户二"
+      shares: 1500
+      cost: 1.698
+
+  # === 偏好设置 ===
+  hold_period_preference: "中线偏长"
+  risk_tolerance: "中"
+  position_max_per_stock_pct: 25
+  max_total_stocks: 6
+  prefer_price_range: [3, 100]
+
+  # === 板块认知 ===
+  preferred_sectors:
+    - "AI算力"
+    - "半导体"
+    - "电力设备"
+    - "创新药"
+  avoid_sectors:
+    - "连板妖股"
+    - "次新股炒作"
+    - "纯题材无业绩"
+
+  # === 操作习惯 ===
+  trading_style: "趋势跟随+底仓持有"
+  use_stop_orders: true
+  check_frequency: "每周2-3次"
+
+  # === 学习目标 ===
+  learning_focus_2026:
+    - "板块5阶段判断"
+    - "资金面分析"
+    - "出货型涨停识别"
+    - "角色化持仓管理"
+
+  # === 版本与校准 ===
+  profile_version: "1.1"
+  profile_created: "2026-05-14"
+  next_calibration_date: "2026-08-14"

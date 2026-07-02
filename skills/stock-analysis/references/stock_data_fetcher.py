@@ -650,12 +650,60 @@ def fetch_north_bound_flow_20d() -> dict:
         return {"net_flow_20d": None, "direction": "unknown", "consecutive_days": None, "source": "failed"}
 
 
+def _fetch_tushare_moneyflow_df(code: str, days: int = 30):
+    """
+    Shared helper: fetch raw Tushare moneyflow DataFrame (5000积分+).
+    Amounts in 万元. Returns sorted DataFrame or None on failure.
+    """
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token or not _check_source("tushare"):
+        return None
+    try:
+        import tushare as ts
+        pro = ts.pro_api(token)
+        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+        start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y%m%d")
+        end = datetime.now().strftime("%Y%m%d")
+        df = pro.moneyflow(ts_code=ts_code, start_date=start, end_date=end)
+        if df is not None and not df.empty and "net_mf_amount" in df.columns:
+            return df.sort_values("trade_date")
+    except Exception as e:
+        _log(f"[{code}] Tushare moneyflow helper failed: {e}")
+    return None
+
+
 def fetch_stock_fund_flow(code: str) -> dict:
     """
     Fetch individual stock fund flow by order size (主力/大单/散户净流入).
-    Source: East Money via akshare (free).
+    Priority: Tushare moneyflow (5000积分+) > akshare East Money.
     Values returned in 亿元. Covers the most recent trading day available.
     """
+    # Priority 0: Tushare moneyflow (more reliable, net_mf_amount in 万元)
+    mf_df = _fetch_tushare_moneyflow_df(code, days=5)
+    if mf_df is not None and not mf_df.empty:
+        latest = mf_df.iloc[-1]
+        main_net = _safe_float(latest.get("net_mf_amount"))
+        main_net_yi = round(main_net / 10000, 4) if main_net is not None else None
+        buy_elg  = _safe_float(latest.get("buy_elg_amount"))
+        sell_elg = _safe_float(latest.get("sell_elg_amount"))
+        buy_lg   = _safe_float(latest.get("buy_lg_amount"))
+        sell_lg  = _safe_float(latest.get("sell_lg_amount"))
+        buy_sm   = _safe_float(latest.get("buy_sm_amount"))
+        sell_sm  = _safe_float(latest.get("sell_sm_amount"))
+        super_net_yi  = round((buy_elg - sell_elg) / 10000, 4) if buy_elg is not None and sell_elg is not None else None
+        large_net_yi  = round((buy_lg  - sell_lg)  / 10000, 4) if buy_lg  is not None and sell_lg  is not None else None
+        retail_net_yi = round((buy_sm  - sell_sm)  / 10000, 4) if buy_sm  is not None and sell_sm  is not None else None
+        direction = "净流入" if (main_net_yi or 0) > 0 else "净流出"
+        _log(f"[{code}] Main force (Tushare): {direction} {main_net_yi}亿")
+        return {
+            "main_force_net_yi": main_net_yi,
+            "super_large_net_yi": super_net_yi,
+            "large_net_yi": large_net_yi,
+            "retail_net_yi": retail_net_yi,
+            "direction": "inflow" if (main_net_yi or 0) > 0 else "outflow",
+            "source": "tushare_moneyflow",
+        }
+    # Priority 1: akshare East Money fallback
     if not _check_source("akshare"):
         return {}
     try:
@@ -721,8 +769,28 @@ def fetch_stock_fund_flow(code: str) -> dict:
 def fetch_fund_flow_multiday(code: str) -> dict:
     """
     Fetch multi-day main force fund flow sums (3d, 5d, 20d) in 亿元.
-    Extends the single-day fetch_stock_fund_flow to multi-period aggregates.
+    Priority: Tushare moneyflow (5000积分+) > akshare fallback.
     """
+    # Priority 0: Tushare moneyflow (net_mf_amount in 万元)
+    mf_df = _fetch_tushare_moneyflow_df(code, days=30)
+    if mf_df is not None and not mf_df.empty:
+        series_yi = mf_df["net_mf_amount"].apply(
+            lambda x: float(x) / 10000 if x is not None else None
+        ).dropna()
+        result = {"source": "tushare_moneyflow"}
+        for n, key in [(3, "fund_flow_3d"), (5, "fund_flow_5d"), (20, "fund_flow_20d")]:
+            tail = series_yi.tail(n)
+            val = round(float(tail.sum()), 4) if len(tail) > 0 else None
+            result[key] = val
+        # Sanity check: realistic upper bounds per period
+        thresholds = {"fund_flow_3d": 120, "fund_flow_5d": 200, "fund_flow_20d": 800}
+        for key, max_yi in thresholds.items():
+            if result.get(key) is not None and abs(result[key]) > max_yi:
+                _log(f"[{code}] {key}={result[key]}亿 exceeds threshold, discarding")
+                result[key] = None
+        _log(f"[{code}] Fund flow 5d={result.get('fund_flow_5d')}亿 20d={result.get('fund_flow_20d')}亿 (Tushare)")
+        return result
+    # Priority 1: akshare fallback
     if not _check_source("akshare"):
         return {}
     try:
@@ -783,6 +851,65 @@ def fetch_fund_flow_multiday(code: str) -> dict:
     except Exception as e:
         _log(f"[{code}] Multi-day fund flow failed: {e}")
         return {}
+
+
+def fetch_tushare_chip_dist(code: str) -> dict:
+    """
+    Fetch real chip distribution from Tushare cyq_perf (6000积分).
+    Returns winner_rate (获利盘%), weight_avg (加权成本), cost percentiles.
+    Much more accurate than VWAP approximation in calc_chip_concentration.
+    """
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token or not _check_source("tushare"):
+        return {"source": "no_tushare_token"}
+    try:
+        import tushare as ts
+        pro = ts.pro_api(token)
+        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+        start = (datetime.now() - timedelta(days=10)).strftime("%Y%m%d")
+        end = datetime.now().strftime("%Y%m%d")
+        df = pro.cyq_perf(ts_code=ts_code, start_date=start, end_date=end)
+        if df is None or df.empty:
+            return {"source": "no_data"}
+        df = df.sort_values("trade_date")
+        latest = df.iloc[-1]
+
+        winner_rate = _safe_float(latest.get("winner_rate"))
+        weight_avg  = _safe_float(latest.get("weight_avg"))
+        cost_5pct   = _safe_float(latest.get("cost_5pct"))
+        cost_15pct  = _safe_float(latest.get("cost_15pct"))
+        cost_50pct  = _safe_float(latest.get("cost_50pct"))
+        cost_85pct  = _safe_float(latest.get("cost_85pct"))
+        cost_95pct  = _safe_float(latest.get("cost_95pct"))
+
+        if winner_rate is None:
+            return {"source": "no_winner_rate"}
+
+        if winner_rate >= 70:
+            interp = "大多数筹码获利，升势健康"
+        elif winner_rate >= 50:
+            interp = "多数筹码获利，结构尚可"
+        elif winner_rate >= 30:
+            interp = "约半数筹码套牢，上方存在解套压力"
+        else:
+            interp = "套牢盘比例高，解套抛压明显"
+
+        _log(f"[{code}] Chip dist (Tushare): winner={winner_rate}%, weight_avg={weight_avg}")
+        return {
+            "winner_rate": winner_rate,
+            "weight_avg": weight_avg,
+            "cost_5pct":  cost_5pct,
+            "cost_15pct": cost_15pct,
+            "cost_50pct": cost_50pct,
+            "cost_85pct": cost_85pct,
+            "cost_95pct": cost_95pct,
+            "interpretation": interp,
+            "trade_date": str(latest.get("trade_date", "")),
+            "source": "tushare_cyq_perf",
+        }
+    except Exception as e:
+        _log(f"[{code}] Tushare cyq_perf failed: {e}")
+        return {"source": "failed", "error": str(e)}
 
 
 def fetch_stock_sector(code: str) -> str:
@@ -1316,7 +1443,7 @@ def fetch_financial_penetration(code: str) -> dict:
                     curr = quarters[-1].get("value_yi")
                     year_ago = quarters[-5].get("value_yi")
                     if curr and year_ago:
-                        yoy_improving = curr > year_ago
+                        yoy_improving = bool(curr > year_ago)
                         yoy_chg = (curr - year_ago)
                         signal = (f"毛利率同比+{yoy_chg:.1f}ppt，盈利能力改善" if yoy_improving
                                   else f"毛利率同比{yoy_chg:.1f}ppt，需关注成本压力")
@@ -1350,7 +1477,7 @@ def fetch_financial_penetration(code: str) -> dict:
                     inst_signal = (f"机构合计持仓环比+{chg:.2f}%，聪明钱在增持" if chg > 0.5
                                    else f"机构合计持仓环比{chg:.2f}%，持仓稳定" if chg > -0.5
                                    else f"机构合计持仓环比{chg:.2f}%，有减持迹象")
-                    inst_increasing = chg > 0.3
+                    inst_increasing = bool(chg > 0.3)
                 else:
                     inst_increasing = None
                 result["inst_holding"] = {
@@ -2095,6 +2222,7 @@ def analyze_stock(code: str, days: int = 120, fetch_news: bool = False) -> dict:
     sector = "未知"
     sector_breadth = {}
     etf_fund_flow = {}
+    chip_dist_real = {}
     if market == "cn_a":
         fundamentals = fetch_tushare_fundamentals(normalized)
         capital_flow["fund_flow"] = fetch_stock_fund_flow(normalized)
@@ -2105,6 +2233,7 @@ def analyze_stock(code: str, days: int = 120, fetch_news: bool = False) -> dict:
         sector_breadth = fetch_sector_breadth(sector)
         etf_fund_flow = fetch_etf_fund_flow(sector)
         financial_penetration = fetch_financial_penetration(normalized)
+        chip_dist_real = fetch_tushare_chip_dist(normalized)
 
     # If realtime is empty (e.g. market closed on weekends), derive basics from last OHLCV bar.
     # This ensures price and change_pct are always available for downstream analysis.
@@ -2135,9 +2264,20 @@ def analyze_stock(code: str, days: int = 120, fetch_news: bool = False) -> dict:
     # Volume heat (动力自重比 + 换手率 + 量比)
     volume_heat = calc_volume_heat(raw.get("realtime", {}))
 
-    # Chip concentration approximation (筹码集中度 — heuristic via volume profile)
+    # Chip concentration: VWAP approximation, overridden by Tushare cyq_perf if available
     current_price = raw.get("realtime", {}).get("price") or (ohlcv[-1]["close"] if ohlcv else None)
     chip_concentration = calc_chip_concentration(ohlcv, current_price)
+    if chip_dist_real.get("source") == "tushare_cyq_perf":
+        # Override VWAP estimate fields with real Tushare data
+        chip_concentration.update({
+            "in_profit_vol_pct": chip_dist_real.get("winner_rate"),   # real 获利盘%
+            "weight_avg_real":   chip_dist_real.get("weight_avg"),    # 加权平均成本
+            "cost_50pct":        chip_dist_real.get("cost_50pct"),    # 中位成本
+            "cost_85pct":        chip_dist_real.get("cost_85pct"),    # 85%成本（上方压力参考）
+            "cost_15pct":        chip_dist_real.get("cost_15pct"),    # 15%成本（支撑参考）
+            "interpretation":    chip_dist_real.get("interpretation"),
+            "source":            "tushare_cyq_perf+vwap",
+        })
 
     # Pool 2 momentum signal (动能视角检查清单)
     momentum_signal = calc_momentum_signal(ohlcv, chip_concentration)

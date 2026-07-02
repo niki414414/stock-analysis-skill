@@ -268,6 +268,7 @@ theme_framework:
         sector_20d_pct: null
         catalyst_quality: "结构性"
         last_updated: "2026-06-01"
+        note: "2026-06-10双重确认主升：①DRAM/NAND合约价大幅上行，存储从'IPO交易'切入'价格周期交易'(MEM-2026-007)；②长江存储母公司IPO辅导备案(MEM-2026-008，替代原长存预热条目)，国产NAND资本化进入正式跟踪，若6月中后正式申报受理可接棒长鑫成为二次催化。"
 
       design_analog:
         label: "模拟芯片"
@@ -323,7 +324,7 @@ theme_framework:
         stage: "主升期"
         style_position: "中位"
         priority: 1
-        note: "长鑫/长存HBM量产驱动；封测(通富独家)+材料(雅克独家前驱体)+接口(澜起)联动；长鑫IPO已上会为近期最强催化"
+        note: "长鑫/长存HBM量产驱动；封测(通富独家)+材料(雅克独家前驱体)+接口(澜起)联动；长鑫IPO已上会为近期最强催化。2026-06-10更新：长江存储母公司IPO辅导备案(MEM-2026-008)，刻蚀/薄膜/清洗/CMP/特气/前驱体/光刻胶/靶材/洁净室全链受益面比长鑫更广，但'6月中旬正式申报'目前仅为媒体预期，未兑现前不可当硬事实。"
         wave_number: 1
         wave_position: "主升早"
         leader_stocks: ["002156", "002409"]
@@ -343,6 +344,7 @@ theme_framework:
         sector_20d_pct: null
         catalyst_quality: null
         last_updated: "2026-06-01"
+        note: "2026-06-10事件地图新增观察级：基本半导体第三次递表港交所(SIC-2026-001)，AI数据中心电源/机器人/低空为待验证第二曲线，市场主线未变，暂不升级stage。观察指标：港股聆讯进展、车规认证、产能利用率。"
 
       diamond_substrate:
         label: "金刚石功能材料（第四代候选）"
@@ -389,13 +391,14 @@ theme_framework:
         sector_20d_pct: null
         catalyst_quality: null
         last_updated: "2026-06-01"
+        note: "2026-06-10事件地图：宇树科技IPO过会并提交注册(ROBOT-2026-004，已兑现/充分交易)，'从整机主题转向高价值零部件订单'；2026世界机器人大会8/19-23举行(ROBOT-2026-005，预热中)，定性为'机器人二次验证窗口'。整机本身已充分交易，催化更多流向humanoid_parts。"
 
       humanoid_parts:
         label: "人形机器人核心零部件"
         stage: "整理期"
         style_position: "中位"
         priority: 2
-        note: "2026-06-08降级：汇川技术20日超额-2.3%（vs创业板），处于整理/调整边界，Gemini判断正确——订单存在但业绩尚未在报表体现，资金开始观望。下一升级条件：Optimus Gen3 Q3出货数据确认。"
+        note: "2026-06-08降级：汇川技术20日超额-2.3%（vs创业板），处于整理/调整边界，Gemini判断正确——订单存在但业绩尚未在报表体现，资金开始观望。下一升级条件：Optimus Gen3 Q3出货数据确认。2026-06-10补充：宇树IPO过会强化执行器/运动控制/伺服/电机/减速器/丝杠/灵巧手/传感器的'高价值零部件订单验证'逻辑(ROBOT-2026-004)；8/19-23世界机器人大会(ROBOT-2026-005)是另一验证窗口，关注展品、量产计划、供应商、工业场景订单。"
         wave_number: 2
         wave_position: "调整"
         leader_stocks: ["300124", "002050"]
@@ -543,13 +546,13 @@ theme_framework:
         stage: "主升期"
         style_position: "中高位"
         priority: 1
-        note: "AI服务器PCB层数/用量远高于传统服务器；铜箔受益AI+电动车双轮驱动；2026-05-27多股涨停确认主升启动"
+        note: "AI服务器PCB层数/用量远高于传统服务器；铜箔受益AI+电动车双轮驱动；2026-05-27多股涨停确认主升启动。2026-06-10新增上游分支：电子布/玻纤/PPE/PPO树脂/铜箔等PCB上游材料价格本周超预期持续上行(PCB-2026-001)，逻辑从'整板'扩散到'材料'，但本周新增强分支需防短线拥挤，关注价格持续性、毛利率传导和高端布认证。2026-06-15：圣泉/东材/华正新材已连续涨停（深跌缩量后），中国巨石(电子布全球龙头)纳入观测，仍属同一上游材料分支。"
         wave_number: 1
         wave_position: "主升早"
-        leader_stocks: ["002463", "300476"]
+        leader_stocks: ["002463", "300476", "600176"]
         sector_20d_pct: 25
         catalyst_quality: "结构性"
-        last_updated: "2026-06-01"
+        last_updated: "2026-06-15"
 
       fiber_optical_dc:
         label: "光纤光缆/数据中心骨干互联"
@@ -569,13 +572,13 @@ theme_framework:
         stage: "整理期"
         style_position: "中位"
         priority: 2
-        note: "400G/800G以太网+InfiniBand集群组网；高速铜互联（DAC/AEC）是光模块补充路线"
+        note: "400G/800G以太网+InfiniBand集群组网；高速铜互联（DAC/AEC）是光模块补充路线。2026-06-15新增：CPO/光模块已充分交易，但短距铜连接(DAC/AEC)及连接器方向扩散滞后，纳入立讯精密等观测，关注是否补涨。"
         wave_number: 2
         wave_position: "调整"
-        leader_stocks: ["000063"]
+        leader_stocks: ["000063", "002475"]
         sector_20d_pct: null
         catalyst_quality: null
-        last_updated: "2026-06-01"
+        last_updated: "2026-06-15"
 
       power_nuclear:
         label: "核电/核能小堆（SMR）"
@@ -776,8 +779,9 @@ theme_framework:
         wave_position: "调整"
         leader_stocks: ["600900"]
         sector_20d_pct: null
-        catalyst_quality: null
-        last_updated: "2026-06-01"
+        catalyst_quality: "纯动量"
+        last_updated: "2026-06-17"
+        note: "高股息防御属性，无特定事件催化，跟随大盘情绪和迎峰度夏用电季节性波动。counter属性：AI行情热时资金回流科技，AI歇脚时接棒防守。"
 
       smart_grid:
         label: "智能电网/电力IT/调度自动化"
@@ -800,8 +804,9 @@ theme_framework:
         wave_position: "调整"
         leader_stocks: ["300001"]
         sector_20d_pct: null
-        catalyst_quality: null
-        last_updated: "2026-06-01"
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-17"
+        note: "桩车比提升逻辑清晰，但运营商盈利模式尚不稳定，主要受益于新能源车销量增长。"
 
   # ── 主线六：六张网+新兴支柱 ──────────────────────────────
   six_networks_emerging:
@@ -821,7 +826,7 @@ theme_framework:
         sector_20d_pct: null
         catalyst_quality: "事件型"
         last_updated: "2026-06-08"
-        note: "2026-06-08降级：中国卫通20日超额-26%（vs创业板），调整期信号明确。中国卫星高点127.77→现价84.95，-33.5%。2025年底第一波已结束，当前资金主动流出。下一升级条件：明确千帆发射节点公告+信号股重新站上MA20+超额转正。"
+        note: "2026-06-08降级：中国卫通20日超额-26%（vs创业板），调整期信号明确。中国卫星高点127.77→现价84.95，-33.5%。2025年底第一波已结束，当前资金主动流出。下一升级条件：明确千帆发射节点公告+信号股重新站上MA20+超额转正。2026-06-10事件地图新增12个月前瞻：2026H2进入朱雀-3/天龙-3集中试射、海南二期发射场建设、商业火箭IPO申报密集期，但定性为'接受为前瞻和产业映射，不上调为当前第一主线'，下游应用占比/太空算力为待验证假设。维持调整期，等具体试射成功/IPO受理节点验证。"
 
       low_altitude_economy:
         label: "低空经济（eVTOL/无人机/通用航空）"
@@ -857,8 +862,9 @@ theme_framework:
         wave_position: "调整"
         leader_stocks: ["300750", "002594"]
         sector_20d_pct: null
-        catalyst_quality: null
-        last_updated: "2026-06-01"
+        catalyst_quality: "结构性"
+        last_updated: "2026-06-17"
+        note: "渗透率提升逻辑确定但价格战压制利润，电池/电控跟随整车销量。下一升级催化：固态电池装车量产节点或出海大单放量。"
 
       rail_transit:
         label: "轨道交通装备（高铁/城轨/磁浮）"
@@ -869,8 +875,72 @@ theme_framework:
         wave_position: "调整"
         leader_stocks: ["601766"]
         sector_20d_pct: null
+        catalyst_quality: "政策型"
+        last_updated: "2026-06-17"
+        note: "十五五铁路规划投资驱动，但节奏取决于国家铁路集团招标进度，非市场自发催化。"
+
+  # ── 主线七：有色金属（大宗资源观察池）────────────────────
+  non_ferrous_metals:
+    label: "有色金属（铜/锂/稀土/铝）"
+    ai_correlation: "hybrid"
+    note: "与科技主线存在需求联动（AI铜/机器人磁材/新能源锂），但驱动逻辑以供需周期+价格为主，与科技事件地图分开维护。对应独立事件地图：~/Desktop/tz/大宗资源事件/csvMMDD/"
+    sub_sectors:
+
+      copper:
+        label: "铜（电解铜/铜材/铜箔）"
+        stage: "整理期"
+        style_position: "中位"
+        priority: 2
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["601899", "000630"]   # 紫金矿业, 铜陵有色
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        ai_correlation: "positive"
+        last_updated: "2026-06-17"
+        note: "AI数据中心+新能源电网铜需求长期逻辑确定，但LME价格受全球宏观扰动大。升级条件：LME铜价站稳8500美元/吨以上+社会库存去化。信号股：紫金矿业(601899)。"
+
+      lithium:
+        label: "锂（碳酸锂/氢氧化锂/锂矿）"
+        stage: "调整期"
+        style_position: "低位"
+        priority: 3
+        wave_number: 2
+        wave_position: "调整"
+        leader_stocks: ["002466", "002460"]   # 天齐锂业, 赣锋锂业
+        sector_20d_pct: null
         catalyst_quality: null
-        last_updated: "2026-06-01"
+        ai_correlation: "independent"
+        last_updated: "2026-06-17"
+        note: "碳酸锂价格长期低位（约7-8万/吨），供大于求格局未改，多数矿山仍在亏损线附近。升级条件：碳酸锂现货价持续站稳10万/吨以上+主要矿山减产公告。暂不适合中线做多。"
+
+      rare_earth:
+        label: "稀土（氧化镨钕/磁材/稀土金属）"
+        stage: "整理期"
+        style_position: "低中位"
+        priority: 2
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["600111", "000831"]   # 北方稀土, 中国稀土
+        sector_20d_pct: null
+        catalyst_quality: "事件型"
+        ai_correlation: "positive"
+        last_updated: "2026-06-17"
+        note: "政策配额管控支撑价格底部，机器人/新能源车电机用磁材需求是中期逻辑。升级条件：工信部收紧稀土出口配额或氧化镨钕价格突破70万/吨。中国稀土集团整合进度也是重要观察指标。"
+
+      aluminum:
+        label: "铝（电解铝/铝箔/铝型材）"
+        stage: "整理期"
+        style_position: "低中位"
+        priority: 3
+        wave_number: 1
+        wave_position: "调整"
+        leader_stocks: ["601600", "000807"]   # 中国铝业, 云铝股份
+        sector_20d_pct: null
+        catalyst_quality: "结构性"
+        ai_correlation: "independent"
+        last_updated: "2026-06-17"
+        note: "光伏边框+新能源车轻量化是需求端增量，但国内供给天花板（4500万吨/年产能红线）已接近，弹性来自电价成本压缩和海外需求。目前无强催化。"
 
 # ============================================================
 # 周校准指标映射（每周花3分钟核对，用市场数据覆盖AI叙事）
@@ -1012,6 +1082,39 @@ weekly_calibration:
       current_stage: "调整期"
       last_verified: "2026-06-08"
       verified_note: "金风科技20日超额-17.5%，降级调整期；装机催化已兑现"
+
+    copper:
+      label: "铜/有色金属"
+      linked_subsectors: ["copper"]
+      etf: "159622"
+      etf_name: "铜ETF(国联安)"
+      signal_stock: "601899"
+      signal_stock_name: "紫金矿业"
+      current_stage: "整理期"
+      last_verified: null
+      verified_note: "待首次校准：查紫金矿业20日超额 vs 沪深300，以及LME铜价vs8500美元/吨"
+
+    lithium:
+      label: "锂/碳酸锂"
+      linked_subsectors: ["lithium"]
+      etf: "159876"
+      etf_name: "锂电ETF(华夏)"
+      signal_stock: "002466"
+      signal_stock_name: "天齐锂业"
+      current_stage: "调整期"
+      last_verified: null
+      verified_note: "待首次校准：查天齐锂业20日超额，以及碳酸锂现货价格趋势"
+
+    rare_earth:
+      label: "稀土/磁材"
+      linked_subsectors: ["rare_earth"]
+      etf: "516780"
+      etf_name: "稀土ETF(华夏)"
+      signal_stock: "600111"
+      signal_stock_name: "北方稀土"
+      current_stage: "整理期"
+      last_verified: null
+      verified_note: "待首次校准：查北方稀土20日超额，以及氧化镨钕现货价格"
 
 # ============================================================
 # 观察池（有突破信号时升级进主线）

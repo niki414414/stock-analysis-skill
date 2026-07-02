@@ -1,0 +1,22 @@
+# Memory Index
+
+- [股票技能体系项目](stock-skills-project.md) — 两个技能的框架设计、关键规则决策和数据源现状，用于跨会话延续开发
+- [数据源优先级](feedback_data_source.md) — Tushare主，akshare/东方财富备选；含单位换算和超时处理要求
+- [持仓状态2026-06-25](portfolio-status-20260625.md) — 账户一工业富联400股+36%建议减100；账户二大族+长电+红利ETF+300ETF仓位40%
+- [入场六层检查清单 v4.8](trading-framework-checklist.md) — v4.8新增A/B维度+盖章人领域映射+四条件提前定价框架
+- [A/B维度+盖章人+管制催化规律](feedback_ab_dimension.md) — v4.8核心变化：Dim A当前业绩+Dim B四条件评估；盖章人按领域映射；管制催化两波规律
+- [v4.3回测结果2026-06-12](backtest-framework-v43-results.md) — 50只10批回测准确率48.3%，A轨迹漏单仍最大缺口
+- [v4.3回测第二轮2026-06-14](backtest-framework-v43-round2-results.md) — 71只/213信号，首次离场模拟：实际可实现收益约为理论值40-45%
+- [v4.3回测第三轮2026-06-15](backtest-framework-v43-round3-results.md) — 跨周期(11-12月)复测，v4.4b低胜率高赔率确认
+- [v4.5月度回测2026-06-20](backtest-monthly-jan-may-2026.md) — 40只×11月=440信号，Qullamaggie门控+PP→ENTER胜率33%→50%
+- [候选：催化深度回踩漏单2026-06](candidate-catalyst-deep-pullback-202606.md) — 圣泉/东材/华正新材案例，待下轮回测验证
+- [科技产业事件地图](industry-events-map.md) — csv0624版本，含功率涨价/台积电涨价/MCU涨价/液冷Rubin/字节capex等新事件
+- [框架回测结论v4.2](backtest-framework-correction-v42.md) — 34只136信号，总准确率53.7%，4月仅32.4%
+- [框架改动方法论](feedback_framework_change_method.md) — 改动前先回顾分层目标→多维对比→奥卡姆剃刀
+- [触发条件追踪清单](reference_trigger_watchlist.md) — ~/stock_trigger_watchlist.md记录待触发入场条件
+- [输出格式：操作决策表](feedback_output_decision_matrix.md) — 结论用"可观察条件→操作"映射表
+- [材料处理与分析质量](feedback_material_reading.md) — 过滤博主仓位笔记；复盘不停在数值窗口，要有框架推论
+- [公司表缺失提醒](feedback_company_pool_missing.md) — 分析时查不到的股票提醒用户更新
+- [选股池改造计划](project-stockpool-redesign.md) — 待专项时间做方案A+C改造
+- [基础设施升级2026-06-25](project-infrastructure-20260625.md) — v4.8框架+csv0624地图+研究材料工作流+供应链图谱启动+严谨回测待做
+- [用户操作复盘：巨石案例](feedback_ab_dimension.md) — 公众号驱动决策的教训：买入前问框架不问公众号，卖出只看价格不看文章

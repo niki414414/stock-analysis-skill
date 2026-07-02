@@ -1,0 +1,311 @@
+---
+name: update-event-map
+description: |
+  科技/非科技产业事件地图维护技能 v1.0。
+  接收用户提供的研究材料（PDF/文本/截图）或自动WebSearch扫描行业动态，
+  完成：加载最新数据库 → 分析材料/搜索 → 分类入库 → 生成新版本CSV+Excel。
+
+  支持操作：
+  - 从研究材料批量提取事件并录入
+  - WebSearch主动扫描行业动态并更新
+  - 手动新增/更新事件、信号、前瞻、修正
+  - 导出Excel主库供查看
+  - 生成迁移包（容灾/换号恢复）
+
+  触发场景：用户要求更新事件地图、提供研究材料要求录入、要求导出Excel/迁移包、
+  要求搜索行业动态并更新数据库
+  示例输入：「更新事件地图」「把这份研报录入事件地图」「导出最新Excel」「生成迁移包」
+  「搜索AI算力最新动态并更新」「这个消息应该进events还是signals」
+allowed-tools:
+  - Read
+  - Write
+  - Bash
+  - WebSearch
+metadata:
+  trigger: 用户要求维护/更新产业事件地图时触发
+  version: "1.0"
+  last_updated: "2026-06-21"
+---
+
+# 产业事件地图维护技能 v1.0
+
+## 核心工具
+
+```
+UPDATER=~/.claude/skills/update-event-map/scripts/event_map_updater.py
+QUERY=~/.claude/skills/stock-analysis/scripts/event_map_query.py
+```
+
+---
+
+## STEP 0: 加载当前状态
+
+每次触发必须先运行：
+
+```bash
+python3 $UPDATER status
+python3 $UPDATER status --source nonfin
+```
+
+向用户报告：当前版本、各表行数、上次更新日期。
+
+---
+
+## STEP 1: 判断模式
+
+根据用户输入判断4种模式：
+
+| 模式 | 触发条件 | 后续步骤 |
+|---|---|---|
+| 材料录入 | 用户提供了文件（PDF/文本/截图/研报） | → STEP 2A |
+| 主动扫描 | "更新事件地图"、"搜索XX最新动态" | → STEP 2B |
+| 手动录入 | "把XX加到events"、"这条进corrections" | → STEP 4（跳过分析） |
+| 导出 | "导出Excel"、"生成迁移包" | → STEP 6/7（直接执行） |
+
+---
+
+## STEP 2A: 材料分析（材料录入模式）
+
+1. 读取用户提供的文件（Read工具读取PDF/文本/图片）
+2. 提取所有事实性声明、数据点、事件、传闻、预测
+3. 对每条信息标注来源可靠性：
+   - A级：官方公告/财报/监管文件
+   - B级：主流财经媒体/行业协会
+   - C级：券商研报/行业调研
+   - D级：传闻/小作文/未核验
+4. 加载现有数据库对比：
+
+```bash
+python3 $QUERY events --sector {相关赛道}
+python3 $QUERY forward --sector {相关赛道}
+python3 $QUERY corrections
+```
+
+5. 可选WebSearch验证关键声明：
+
+```
+WebSearch("{事件关键词} {当前年月}")
+```
+
+---
+
+## STEP 2B: 主动扫描（WebSearch模式）
+
+按赛道依次搜索（每次最多选3-5个重点赛道）：
+
+```
+WebSearch("{赛道} 最新产业动态 订单 催化 {当前年月}")
+```
+
+科技重点赛道清单：
+- AI算力、半导体、存储、先进封装
+- 光通信/CPO/NPO、PCB/CCL、被动元件/MLCC
+- 机器人/Physical AI、SiC/GaN
+- AI应用/SaaS/Agent、端侧AI
+- 商业航天/6G、液冷/散热
+
+非科技重点赛道：
+- 有色金属、储能、创新药、银行/证券
+
+对搜索结果与现有数据库做增量比对。
+
+---
+
+## STEP 3: 分类决策
+
+对每条提取的信息，按以下决策树分类：
+
+```
+Q1: 有官方来源（公告/财报/权威媒体）？
+  YES → Q2
+  NO  → signals_early（confidence_level=低/中）
+
+Q2: 已经发生或正在发生？
+  YES → events（新事件）或 更新现有事件状态
+  NO  → Q3
+
+Q3: 是对未来的预测/催化窗口？
+  YES → forward
+  NO  → Q4
+
+Q4: 指出现有判断需要修正/降权？
+  YES → corrections
+  NO  → signals_early（作为产业线索留存）
+
+附加规则：
+- 涉及具体订单量/目标市值/上市时间 → signals_early，不进events
+- 技术路线争议/数据不一致 → corrections
+- 高拥挤方向 → corrections（提高验证门槛）
+- 产业链新环节/新公司类型 → mapping
+- 信息来源 → 同步写入sources
+```
+
+---
+
+## STEP 4: Delta对比 + 用户确认
+
+将拟录入的内容整理成表格向用户展示：
+
+```
+拟录入变更清单（{日期}）
+
+NEW    events    AI-2026-011  {事件名称}  来源: {来源}
+NEW    signals   SIG-{date}-001  {信号内容}  confidence: 中
+UPDATE events    MEM-2026-005  当前状态: 进行中→已兑现
+SKIP   (已存在) PCB-2026-002  PCB涨价传导  
+
+确认录入？（Y/调整/取消）
+```
+
+生成ID时调用：
+```bash
+python3 $UPDATER next-ids --table events --sector {赛道} --count {N}
+python3 $UPDATER next-ids --table signals_early --count {N}
+```
+
+---
+
+## STEP 5: 写入
+
+用户确认后：
+
+1. 构造changes JSON，写入/tmp/event_map_changes.json：
+
+```json
+{
+  "source": "tech",
+  "date": "YYYYMMDD",
+  "label": "描述标签",
+  "additions": {
+    "events": [{"事件ID": "...", "一级赛道": "...", ...}],
+    "signals_early": [...],
+    "forward": [...],
+    "corrections": [...],
+    "mapping": [...],
+    "sources": [...]
+  },
+  "updates": {
+    "events": [{"id_value": "MEM-2026-005", "fields": {"当前状态": "已兑现"}}]
+  }
+}
+```
+
+2. 执行写入：
+
+```bash
+python3 $UPDATER apply --source tech --date {MMDD} --label {label} --changes /tmp/event_map_changes.json
+```
+
+3. 验证：
+
+```bash
+python3 $UPDATER validate
+```
+
+---
+
+## STEP 5.5: 公司池同步（每次更新必做）
+
+材料中提到的具体公司名称，检查是否已在公司.xlsx中：
+
+```bash
+python3 $QUERY pool --json  # 获取当前池内所有代码
+```
+
+对每个新提到的公司：
+1. 查company_code_map.csv确认有A股代码
+2. 不在公司.xlsx → 按(一级赛道, 二级环节, 三级环节/定位, 关联事件ID)写入科技/非科技公司池
+3. 写入后signal_scanner自动覆盖，无需额外操作
+
+**关键链路**：事件地图更新 → 公司池同步 → scanner自动扫描新公司
+
+---
+
+## STEP 6: 导出Excel + 迁移包（每次更新自动执行）
+
+```bash
+# Excel导出
+python3 $UPDATER export-excel --source tech --output ~/Desktop/tz/科技产业事件/{MMDD}.xlsx
+
+# 迁移包自动生成（覆盖最新版，含框架快照）
+python3 $UPDATER migrate --output ~/Desktop/tz/迁移包_latest
+```
+
+Excel包含10个sheet（00_使用说明 到 10_早期信号追踪），冻结首行，自适应列宽。
+迁移包自动覆盖到固定路径`迁移包_latest`，始终是最新完整备份。
+
+---
+
+## STEP 7: 框架快照 + 迁移包
+
+**自动快照触发条件**（框架实质性修改时必须执行）：
+- analysis-prompt-template.md 新增/修改了层级规则（如v4.6左侧试探）
+- signal_scanner.py 修改了池子来源或评分逻辑
+- 新增了skill或重大工作流变更
+
+```bash
+# 创建框架版本快照
+python3 ~/.claude/skills/stock-analysis/scripts/framework_snapshot.py snapshot \
+  --version {版本号} --note "{变更说明}"
+
+# 查看历史版本
+python3 ~/.claude/skills/stock-analysis/scripts/framework_snapshot.py list
+```
+
+**迁移包生成**（每次事件地图更新后自动执行）：
+```bash
+python3 $UPDATER migrate --output ~/Desktop/tz/迁移包_{YYYYMMDD}
+```
+
+迁移包包含：科技+非科技数据库、公司池、技能代码、**框架版本快照**、历史材料、恢复指南。
+新账号拿到迁移包后按README步骤恢复，所有技能和数据完整可用。
+
+---
+
+## STEP 8: 报告
+
+向用户输出更新摘要：
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  事件地图更新完成 — {YYYY-MM-DD}
+  版本: csv{MMDD}_{label}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  变更统计:
+  events:        +{N}新增  ~{M}更新
+  signals_early: +{N}新增
+  forward:       +{N}新增
+  corrections:   +{N}新增
+  sources:       +{N}新增
+
+  验证: ✓ 通过 / ⚠️ {N}个问题
+
+  Excel已导出: {path}
+
+  下一步: /stock-analysis 或 /top-picks 将自动使用新版本
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+---
+
+## 错误处理
+
+| 场景 | 处理 |
+|---|---|
+| CSV目录不存在 | 提示用户检查路径或从迁移包恢复 |
+| changes JSON字段名不匹配 | 显示正确字段名，要求修正 |
+| 事件ID重复 | 警告并要求确认是否覆盖 |
+| 赛道名不在已知列表 | 显示已知赛道列表供选择 |
+| WebSearch无结果 | 标注"无搜索结果"，基于已有材料继续 |
+| validate有问题 | 列出问题，让用户决定是否修正 |
+
+---
+
+## 禁止事项
+
+- 不输出买入/卖出/持有建议
+- 不输出目标价/目标市值
+- 公司名称仅用于产业链定位
+- 传闻订单不直接写成事实事件
+- 不单独覆盖旧版本（始终创建新csvMMDD）
