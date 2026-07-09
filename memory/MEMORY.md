@@ -20,3 +20,6 @@
 - [选股池改造计划](project-stockpool-redesign.md) — 待专项时间做方案A+C改造
 - [基础设施升级2026-06-25](project-infrastructure-20260625.md) — v4.8框架+csv0624地图+研究材料工作流+供应链图谱启动+严谨回测待做
 - [用户操作复盘：巨石案例](feedback_ab_dimension.md) — 公众号驱动决策的教训：买入前问框架不问公众号，卖出只看价格不看文章
+- [备份仓库2026-07-02](project-backup-repo-20260702.md) — GitHub私库niki414414/stock-analysis-skill，token 90天到期需续期，需持续同步维护
+- [催化窗口期模型v1.0](catalyst-window-model.md) — A-E五类催化类型+event_map_query.py window命令，基于reviews.csv实证校准
+- [赛道校准方法验证2026-07-05](feedback_calibration_method.md) — 20日超额收益IC=0.12，中间两档无意义；过热期用PE分位不用动量；两档简化校准规则
