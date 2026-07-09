@@ -637,6 +637,11 @@ def cmd_migrate(output_dir=None):
     if output_dir is None:
         output_dir = os.path.join(os.path.expanduser("~/Desktop/tz"), f"迁移包_{date}")
 
+    # 每次全新生成，不在旧目录上叠加——否则历史版本的目录结构/已删除脚本的残留
+    # 会一直躺在里面（曾发现05_技能代码/top-picks_references是06-30遗留，早已过期）。
+    if os.path.isdir(output_dir):
+        shutil.rmtree(output_dir)
+
     dirs = [
         os.path.join(output_dir, "01_项目主索引_README"),
         os.path.join(output_dir, "02_科技主线数据库"),
@@ -710,19 +715,16 @@ def cmd_migrate(output_dir=None):
             if os.path.isdir(src_vdir):
                 shutil.copytree(src_vdir, os.path.join(dst_fw, vdir), dirs_exist_ok=True)
         print(f"框架版本快照已打包")
-    # Also copy current analysis template directly
-    analysis_tmpl = os.path.expanduser(
-        "~/.claude/skills/stock-analysis/references/analysis-prompt-template.md")
-    if os.path.exists(analysis_tmpl):
-        shutil.copy2(analysis_tmpl, os.path.join(output_dir, "07_技能代码"))
-    scanner = os.path.expanduser(
-        "~/.claude/skills/top-picks/references/signal_scanner.py")
-    if os.path.exists(scanner):
-        shutil.copy2(scanner, os.path.join(output_dir, "07_技能代码"))
-    snapshot_script = os.path.expanduser(
-        "~/.claude/skills/stock-analysis/scripts/framework_snapshot.py")
-    if os.path.exists(snapshot_script):
-        shutil.copy2(snapshot_script, os.path.join(output_dir, "07_技能代码"))
+    # Also copy current analysis template + scripts directly（唯一权威清单——
+    # 每次新增技能脚本必须加进这个列表，否则迁移包会静默漏掉，见2026-07-10教训）
+    for src in (
+        os.path.expanduser("~/.claude/skills/stock-analysis/references/analysis-prompt-template.md"),
+        os.path.expanduser("~/.claude/skills/stock-analysis/scripts/catalyst_window_model.py"),
+        os.path.expanduser("~/.claude/skills/stock-analysis/scripts/framework_snapshot.py"),
+        os.path.expanduser("~/.claude/skills/top-picks/references/catalyst_left_side_scanner.py"),
+    ):
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(output_dir, "07_技能代码"))
 
     # 01: README
     readme_content = f"""# 产业事件地图迁移包
@@ -736,11 +738,12 @@ def cmd_migrate(output_dir=None):
 4. 将 04_代表公司分类池/ 下的文件复制到 ~/Desktop/tz/
 5. 将 07_技能代码/event_map_updater.py 放入 ~/.claude/skills/update-event-map/scripts/
 6. 将 07_技能代码/SKILL.md 放入 ~/.claude/skills/update-event-map/
-7. 将 07_技能代码/event_map_query.py 放入 ~/.claude/skills/stock-analysis/scripts/
+7. 将 07_技能代码/event_map_query.py 和 catalyst_window_model.py 放入 ~/.claude/skills/stock-analysis/scripts/
 8. 将 07_技能代码/analysis-prompt-template.md 放入 ~/.claude/skills/stock-analysis/references/
-9. 将 07_技能代码/signal_scanner.py 放入 ~/.claude/skills/top-picks/references/
-10. 将 08_框架版本快照/ 复制到 ~/Desktop/tz/framework_versions/
-11. 将 05_历史材料/ 中的memory/*.md 复制到 ~/.claude/projects/对应目录/memory/
+9. 将 07_技能代码/catalyst_left_side_scanner.py 放入 ~/.claude/skills/top-picks/references/
+10. 将 07_技能代码/framework_snapshot.py 放入 ~/.claude/skills/stock-analysis/scripts/
+11. 将 08_框架版本快照/ 复制到 ~/Desktop/tz/framework_versions/
+12. 将 05_历史材料/ 中的memory/*.md 复制到 ~/.claude/projects/对应目录/memory/
 
 ## 数据概况
 
