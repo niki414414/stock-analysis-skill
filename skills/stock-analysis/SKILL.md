@@ -123,12 +123,18 @@ python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py events --sect
 python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py mapping --sector {一级赛道} --keyword {细分环节/产品关键词}
 python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py forward --sector {一级赛道}
 python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py corrections
+python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py window --sector {一级赛道}
 ```
 
 - `events`：该赛道未充分交易的催化事件
 - `mapping`：该赛道在产业链中的环节和代表公司类型（第三层用）
 - `forward`：未来30/90天/12个月前瞻事件
 - `corrections`：本周修正清单（全市场，先看一遍避免依据过时判断）
+- `window`：**第二层催化判断的强制校验步骤**——`events`列出的催化事件不分新旧，`window`才是"这个催化现在还能不能作为入场理由"的唯一权威判断（A-E衰减模型）。找到该股票匹配的事件ID后，检查它落在哪个分类：
+  - 🔴🟡 → 催化仍新鲜，可以作为第二层"通过"依据
+  - 🟢 → 趋势配置期，催化真实但不紧迫，第二层最多给"谨慎通过"
+  - 🔵 → 需等季报验证，第二层不能单独作为通过理由，要等业绩兑现
+  - ⚪ → 催化已经"不操作/窗口结束"，**即使`events`表还显示这条事件，第二层也不能拿它当通过理由**，必须说明"催化已过期，若要入场需要新的催化支撑"
 
 脚本自动取`~/Desktop/tz/科技产业事件/`下日期最新的`csvMMDD/`文件夹。
 

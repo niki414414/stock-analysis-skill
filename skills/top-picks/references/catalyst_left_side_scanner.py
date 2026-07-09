@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-catalyst_left_side_scanner.py — 催化优先左侧扫描器 v1.2
+catalyst_left_side_scanner.py — 催化优先左侧扫描器 v2.0
 
 逻辑：催化活跃 → 价格未动 → 启动就绪度 → 左侧窗口
 与现有扫描器的区别：
-  signal_scanner:    价格异动 → 检查有没有催化（右侧确认）
-  prelaunch_scanner: 技术蓄力 → 检查有没有催化（技术右侧）
+  signal_scanner:    价格异动 → 检查有没有催化（右侧确认，已删除）
+  prelaunch_scanner: 技术蓄力 → 检查有没有催化（技术右侧，已删除）
   本扫描器:          催化活跃 → 价格还没动 → 量能/支撑/收敛三维评估（催化左侧）
+
+v2.0变化（2026-07-10）：催化新鲜度不再自己解析events.csv的静态"重要程度/当前状态"
+标签打分，改为调用 event_map_query.py window --json（catalyst_window_model.py的
+A-E衰减模型），事件是否还"活跃"以窗口模型的🔴🟡🟢🔵⚪判断为准，避免过期催化被
+静态标签误判为"活跃"。见~/.claude/projects/-Users-niki/memory/project-leftside-rightside-unification.md
 
 启动就绪度（0-10）：
   ① 量能方向（5分）：近5日量能趋势↑(+3) + vol_ratio>1.2(+2)
@@ -131,56 +136,62 @@ def _get_pro():
     import tushare as ts
     return ts.pro_api(token)
 
-# ── Step 1: 催化过滤 ──────────────────────────────────────────────────────────
-ALREADY_TRADED_KEYWORDS = ["充分交易", "已兑现", "已退出", "快速交易"]
-ACTIVE_BONUS = {
-    "初步交易": 3, "部分交易": 2, "涨价启动": 2, "涨价进行": 2,
-    "进行中": 1, "超预期": 2, "认证完成": 2, "规模化落地": 2,
-    "前瞻升温": 1, "未充分兑现": 2, "观察级": 0,
-}
+# ── Step 1: 催化过滤（唯一权威来源=event_map_query.py window，见下方load_window_scores）─────
+# 不再自己解析events.csv的"重要程度/当前状态"字段打分——那套静态标签不衰减，
+# 会让过期几个月的催化一直显示"活跃"。新鲜度/是否还能操作全部交给window模型判断。
 
-def _importance_score(val: str) -> int:
-    return str(val).count("★")
+EVENT_MAP_QUERY_SCRIPT = os.path.expanduser(
+    "~/.claude/skills/stock-analysis/scripts/event_map_query.py"
+)
 
-def _status_bonus(val: str) -> int:
-    val = str(val)
-    if any(k in val for k in ALREADY_TRADED_KEYWORDS):
-        return -10  # 充分交易直接排除
-    bonus = 0
-    for kw, b in ACTIVE_BONUS.items():
-        if kw in val:
-            bonus = max(bonus, b)
-    return bonus
+# bucket → 权重：🔴🟡按窗口模型原分值计（催化最紧迫），🟢按趋势配置期打6折，
+# 🔵Wave2窗口打3.5折（低拥挤重入，值得看但不是当下重点），⚪直接排除（不操作/已退出）。
+BUCKET_WEIGHT = {"red": 1.0, "yellow": 0.85, "green": 0.6, "blue": 0.35, "gray": 0.0}
+BUCKET_ICON   = {"red": "🔴", "yellow": "🟡", "green": "🟢", "blue": "🔵", "gray": "⚪"}
 
-def load_active_events(min_importance: int = 3) -> pd.DataFrame:
-    """加载events表，过滤出活跃且重要的事件，打催化分。"""
-    import glob
-    # 找最新csv目录（只匹配 csv0MMDD 格式，排除 csv618/csv620 等老格式）
-    all_dirs = glob.glob(CSV_BASE_DIR + "csv*")
-    dirs = sorted([d for d in all_dirs if re.search(r'csv0\d{3}$', os.path.basename(d))], reverse=True)
-    if not dirs:
-        raise FileNotFoundError(f"找不到事件地图目录: {CSV_BASE_DIR}csv*")
-    csv_dir = dirs[0]
-    event_files = glob.glob(csv_dir + "/events*.csv")
-    if not event_files:
-        raise FileNotFoundError(f"找不到events CSV: {csv_dir}")
-    
-    df = pd.read_csv(event_files[0])
-    log.info(f"事件地图: {event_files[0]} ({len(df)}行)")
-    
-    # 计算催化分
-    df["importance_score"] = df["重要程度"].apply(_importance_score)
-    df["status_bonus"]     = df["当前状态"].apply(_status_bonus)
-    df["catalyst_score"]   = df["importance_score"] + df["status_bonus"]
-    
-    # 过滤：重要程度≥min_importance 且 status_bonus≥0（未充分交易）
-    active = df[
-        (df["importance_score"] >= min_importance) &
-        (df["status_bonus"] >= 0)
-    ].copy()
-    
-    log.info(f"活跃事件: {len(active)}/{len(df)} 个")
-    return active
+def load_window_scores(source: str = "tech", top: int = 300) -> dict:
+    """调用event_map_query.py window --json，取窗口模型对每个事件的最新判断。
+
+    这是全局唯一的催化新鲜度计算入口，scanner不再自己算一遍——
+    避免出现"scanner说预热，window模型说已经不操作"这种自相矛盾。
+    """
+    import subprocess
+    result = subprocess.run(
+        ["python3", EVENT_MAP_QUERY_SCRIPT, "window",
+         "--source", source, "--json", "--top", str(top)],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"window模型调用失败: {result.stderr[:500]}")
+    events = json.loads(result.stdout)
+    if isinstance(events, dict) and "error" in events:
+        raise FileNotFoundError(events["error"])
+    return {e["event_id"]: e for e in events}
+
+def load_active_events() -> pd.DataFrame:
+    """从window模型结果构建候选事件表，排除⚪(不操作/已退出)的事件。
+
+    重要程度已经在window模型的score_event()里折算进final_score，
+    这里不再单独按★数过滤。
+    """
+    window_scores = load_window_scores()
+
+    rows = []
+    for eid, e in window_scores.items():
+        weight = BUCKET_WEIGHT.get(e["bucket"], 0.0)
+        if weight <= 0:
+            continue
+        rows.append({
+            "事件ID":      eid,
+            "事件名称":     e["event_name"],
+            "当前状态":     e["action"],          # 用window模型的操作建议取代原始状态文本
+            "bucket":      e["bucket"],
+            "catalyst_score": round(e["final_score"] * weight, 1),
+        })
+
+    df = pd.DataFrame(rows)
+    log.info(f"窗口模型活跃事件(已排除⚪不操作/已退出): {len(df)} 个")
+    return df
 
 # ── Step 2: 公司映射 ──────────────────────────────────────────────────────────
 def parse_event_ids(val) -> list:
@@ -194,6 +205,7 @@ def load_company_candidates(active_events: pd.DataFrame) -> pd.DataFrame:
     event_score_map = dict(zip(active_events["事件ID"], active_events["catalyst_score"]))
     event_name_map  = dict(zip(active_events["事件ID"], active_events["事件名称"].astype(str).str[:30]))
     event_status_map= dict(zip(active_events["事件ID"], active_events["当前状态"].astype(str)))
+    event_bucket_map= dict(zip(active_events["事件ID"], active_events["bucket"].astype(str)))
 
     pool = pd.read_excel(COMPANY_POOL, sheet_name="科技公司池")
     a_pool = pool[pool["市场/属性"].astype(str).str.contains("A股", na=False)].copy()
@@ -220,6 +232,7 @@ def load_company_candidates(active_events: pd.DataFrame) -> pd.DataFrame:
             "event_id":      matched_id,
             "event_name":    event_name_map.get(matched_id, ""),
             "event_status":  event_status_map.get(matched_id, ""),
+            "event_bucket":  event_bucket_map.get(matched_id, "gray"),
             "catalyst_score": event_score_map.get(matched_id, 0),
             "sector":        str(row.get("一级赛道", "")),
             "sub_sector":    str(row.get("二级环节", "")),
@@ -430,11 +443,12 @@ def print_results(df: pd.DataFrame, top_n: int = 20):
 
     for i, (_, row) in enumerate(df.head(top_n).iterrows()):
         icon  = READINESS_ICON.get(row["lr_label"], "⚪")
+        bucket_icon = BUCKET_ICON.get(row.get("event_bucket", "gray"), "⚪")
         print(f"\n[{i+1:02d}] {row['name']} ({row['code']})  "
               f"综合分:{row['final_score']:.0f}  "
               f"{icon}启动就绪:{row['lr_score']}/10 [{row['lr_label']}]")
-        print(f"  催化: {row['event_name']}  [{row['event_id']}  催化分:{row['catalyst_score']}]")
-        print(f"  状态: {row['event_status']}")
+        print(f"  催化: {row['event_name']}  [{row['event_id']}  催化分:{row['catalyst_score']}  {bucket_icon}窗口:{row.get('event_bucket','?')}]")
+        print(f"  操作建议: {row['event_status']}")
         print(f"  赛道: {row['sector']} → {row['sub_sector']}")
         print(f"  价格: {row['close']}  MA60:{row['ma60']}  近30日:{row['pct_30d']:+.1f}%  距高:{row['dist_60d_high']:.1f}%")
         print(f"  量价: {row['lr_detail']}")
@@ -467,10 +481,9 @@ def resolve_trade_date(pro) -> str:
     return today
 
 def main():
-    parser = argparse.ArgumentParser(description="催化优先左侧扫描器 v1.1")
+    parser = argparse.ArgumentParser(description="催化优先左侧扫描器 v2.0（催化打分改由window模型统一计算）")
     parser.add_argument("--top",              type=int,   default=20,  help="输出前N个")
-    parser.add_argument("--min-event-score",  type=int,   default=5,   help="最低催化分")
-    parser.add_argument("--min-importance",   type=int,   default=3,   help="最低重要程度(★数)")
+    parser.add_argument("--min-event-score",  type=int,   default=3,   help="最低催化分（window模型final_score×bucket权重后的值）")
     parser.add_argument("--json",             action="store_true",      help="JSON输出")
     args = parser.parse_args()
 
@@ -482,8 +495,8 @@ def main():
     if not args.json:
         rotation_check(pro)
 
-    # Step 1: 活跃事件
-    active_events = load_active_events(min_importance=args.min_importance)
+    # Step 1: 活跃事件（唯一权威来源=window模型，见load_window_scores）
+    active_events = load_active_events()
     active_events = active_events[active_events["catalyst_score"] >= args.min_event_score]
     log.info(f"催化分≥{args.min_event_score} 的事件: {len(active_events)} 个")
 

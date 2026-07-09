@@ -474,6 +474,141 @@ def query_status(keyword=None, stage_filter=None, source="tech"):
     return df[cols], src
 
 
+def _build_event_company_index():
+    """构建事件ID → A股公司列表的索引（从公司.xlsx的关联事件ID字段）。"""
+    try:
+        tech = pd.read_excel(COMPANY_POOL, sheet_name='科技公司池')
+        nonfin = pd.read_excel(COMPANY_POOL, sheet_name='非科技公司池')
+        all_co = pd.concat([tech, nonfin], ignore_index=True)
+        a_stock = all_co[all_co['市场/属性'].astype(str).str.contains('A股', na=False)]
+    except Exception:
+        return {}
+
+    code_map = get_code_map()
+    index: dict = {}
+    for _, row in a_stock.iterrows():
+        event_ids_str = str(row.get('关联事件ID', ''))
+        if not event_ids_str or event_ids_str == 'nan':
+            continue
+        name = str(row.get('公司名称', ''))
+        code = code_map.get(name, '')
+        sub2 = str(row.get('二级环节', ''))
+        role = str(row.get('角色', ''))
+        for eid in event_ids_str.replace('；', ';').replace('，', ';').split(';'):
+            eid = eid.strip()
+            if not eid:
+                continue
+            index.setdefault(eid, []).append({
+                'name': name, 'code': code,
+                'sub2': sub2, 'role': role,
+            })
+    return index
+
+
+def compute_scored_events(source="tech", sector=None):
+    """对所有活跃事件计算窗口位置，返回 (scored列表, 数据源路径)。
+
+    这是"催化是否新鲜/该不该操作"的唯一计算入口——window日历展示、
+    scanner候选打分、stock-analysis第二层催化预处理都必须调这个函数，
+    禁止任何消费方各自重新计算一遍。
+    """
+    import sys, os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from catalyst_window_model import score_event, parse_event_date, classify_bucket
+
+    from datetime import date
+    today = date.today()
+
+    events_df, src = query_events(sector, exclude_full_traded=True, source=source)
+    if events_df.empty:
+        return [], src
+
+    company_index = _build_event_company_index()
+
+    # 双时钟：构建 event_id → 最新corrections日期 的索引
+    correction_dates: dict = {}
+    try:
+        corr_df, _ = query_corrections(source=source)
+        if not corr_df.empty and "对应事件ID" in corr_df.columns and "更新日期" in corr_df.columns:
+            for _, row in corr_df.iterrows():
+                raw_ids = str(row.get("对应事件ID", "")).strip()
+                if not raw_ids or raw_ids == "nan" or raw_ids.upper() == "ALL":
+                    continue
+                parsed = parse_event_date(str(row.get("更新日期", "")))
+                if parsed is None:
+                    continue
+                # 支持分号分隔的多事件ID（如 "MLCC-2026-001;CAP-2026-001"）
+                for eid in raw_ids.replace("；", ";").split(";"):
+                    eid = eid.strip()
+                    if not eid:
+                        continue
+                    if eid not in correction_dates or parsed > correction_dates[eid]:
+                        correction_dates[eid] = parsed
+    except Exception:
+        pass  # corrections不可用时降级为单时钟
+
+    scored = []
+    for _, row in events_df.iterrows():
+        event_id = str(row.get("事件ID", ""))
+        result = score_event(
+            event_id=event_id,
+            event_name=str(row.get("事件名称", "")),
+            event_time=str(row.get("事件时间", "")),
+            event_status=str(row.get("当前状态", "")),
+            importance=str(row.get("重要程度", "")),
+            expectation_gap=str(row.get("是否存在预期差", "")),
+            today=today,
+            latest_correction_date=correction_dates.get(event_id),
+        )
+        result['companies'] = company_index.get(event_id, [])
+        result['bucket'] = classify_bucket(result)
+        scored.append(result)
+
+    scored.sort(key=lambda x: (-x.get("urgency", 0), -x.get("final_score", 0)))
+    return scored, src
+
+
+def query_window(source="tech", top=50, sector=None):
+    """催化窗口日历：对所有活跃事件计算当前窗口位置，并关联公司池输出受益股。"""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from catalyst_window_model import format_calendar_output
+
+    try:
+        scored, src = compute_scored_events(source=source, sector=sector)
+    except FileNotFoundError as e:
+        return str(e), "N/A"
+
+    if not scored:
+        return "无活跃事件", "N/A"
+
+    from datetime import date
+    output = format_calendar_output(scored[:top], today=date.today())
+    return output, src
+
+
+def query_window_json(source="tech", top=300, sector=None):
+    """催化窗口日历的JSON形态，供scanner/其他脚本消费（而非重新计算）。"""
+    scored, src = compute_scored_events(source=source, sector=sector)
+    out = []
+    for e in scored[:top]:
+        edate = e.get("event_date")
+        out.append({
+            "event_id":     e["event_id"],
+            "event_name":   e["event_name"],
+            "catalyst_type": e.get("catalyst_type"),
+            "event_date":   edate.isoformat() if edate else None,
+            "bucket":       e.get("bucket", "gray"),
+            "urgency":      e.get("urgency", 0),
+            "final_score":  e.get("final_score", 0),
+            "action":       e.get("action"),
+            "phase_label":  e.get("phase_label"),
+            "t_current":    e.get("t_current"),
+            "t_to_peak":    e.get("t_to_peak"),
+        })
+    return out, src
+
+
 def main():
     SOURCE_HELP = "数据源：tech=科技主线（默认），nonfin=非科技主线（有色/储能/绿能/机械/银行/证券/创新药）"
 
@@ -516,9 +651,31 @@ def main():
     p_catalyst.add_argument("--json", action="store_true", help="输出JSON格式")
     p_catalyst.add_argument("--top", type=int, default=30, help="输出前N只（默认30）")
 
+    p_window = sub.add_parser("window", help="催化窗口日历：当前活跃事件的时间位置+操作建议（基于A-E类型模型）")
+    p_window.add_argument("--source", choices=["tech", "nonfin"], default="tech", help=SOURCE_HELP)
+    p_window.add_argument("--sector", help="按一级赛道筛选，如 半导体 / 机器人")
+    p_window.add_argument("--top", type=int, default=50, help="最多显示N个事件（默认50）")
+    p_window.add_argument("--json", action="store_true",
+                          help="JSON输出（供scanner等脚本消费，禁止其他脚本重新计算窗口位置）")
+
     args = parser.parse_args()
 
-    if args.cmd == "catalyst":
+    if args.cmd == "window":
+        sector = getattr(args, "sector", None)
+        if args.json:
+            import json
+            try:
+                records, src = query_window_json(args.source, args.top, sector)
+            except FileNotFoundError as e:
+                print(json.dumps({"error": str(e)}, ensure_ascii=False))
+                return
+            print(json.dumps(records, ensure_ascii=False, indent=2))
+            return
+        output, src = query_window(args.source, args.top, sector)
+        print(f"数据源: {src}")
+        print(output)
+        return
+    elif args.cmd == "catalyst":
         candidates, src = query_catalyst_candidates(args.source)
         print(f"数据源: {src}")
         if not candidates:

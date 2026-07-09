@@ -204,20 +204,18 @@ python3 $UPDATER validate
 
 ---
 
-## STEP 5.5: 公司池同步（每次更新必做）
+## STEP 5.5: 公司池同步（2026-07-10起自动执行，无需手动操作）
 
-材料中提到的具体公司名称，检查是否已在公司.xlsx中：
+`apply`命令内部会自动调用`sync_company_pool()`：扫描本次新增的mapping行的"代表公司/公司类型"字段，查company_code_map.csv确认A股代码，不在公司.xlsx里的自动按(一级赛道, 二级环节, 三级环节/定位, 关联事件ID)写入对应的科技/非科技公司池sheet。apply运行完会打印同步结果（新增几家/跳过几家无代码的）。
 
+**这一步不再需要你（Claude）记得手动做**——之前这里是纯prompt指令，容易漏做；现在写死在代码里，只要走了STEP 5的`apply`就一定会跑。
+
+若某次material里提到的公司改动没走`apply`（比如只是手动改了mapping.csv），可以单独补跑：
 ```bash
-python3 $QUERY pool --json  # 获取当前池内所有代码
+python3 $UPDATER sync-pool --source tech --changes /tmp/event_map_changes.json
 ```
 
-对每个新提到的公司：
-1. 查company_code_map.csv确认有A股代码
-2. 不在公司.xlsx → 按(一级赛道, 二级环节, 三级环节/定位, 关联事件ID)写入科技/非科技公司池
-3. 写入后signal_scanner自动覆盖，无需额外操作
-
-**关键链路**：事件地图更新 → 公司池同步 → scanner自动扫描新公司
+**关键链路**：事件地图更新(apply) → 公司池自动同步(sync_company_pool) → scanner/window模型自动覆盖新公司，无需额外操作
 
 ---
 

@@ -38,4 +38,4 @@ metadata:
 - MLCC-2026-001（5月起）因T+64天已进入Wave2区
 
 **Why:** 用户发现"催化类型→持仓周期"映射比纯事件列表更指导操作，要求建立数据闭环。
-**How to apply:** 每次/top-picks或/stock-analysis前先运行window命令获取当前窗口位置，确认目标事件处于🔴或🟡再操作。
+**How to apply（2026-07-09更正）:** 这个模型建成后从未被接入`/top-picks`或`/stock-analysis`的实际workflow，只是`event_map_query.py window`的旁路CLI命令，两个技能至今不会自动调用它。备份仓库(~/Desktop/tz/repo)也停在07-02，比这个模型还早，没有这份代码。在正式接入前，任何用到"这个催化还新不新鲜"的判断都必须手动跑一次`window`命令交叉检查，不能假设scanner或六层已经考虑了它。接入计划见[[project-leftside-rightside-unification]]，完成标准见[[feedback_tool_integration_standard]]。

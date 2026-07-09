@@ -23,3 +23,5 @@
 - [备份仓库2026-07-02](project-backup-repo-20260702.md) — GitHub私库niki414414/stock-analysis-skill，token 90天到期需续期，需持续同步维护
 - [催化窗口期模型v1.0](catalyst-window-model.md) — A-E五类催化类型+event_map_query.py window命令，基于reviews.csv实证校准
 - [赛道校准方法验证2026-07-05](feedback_calibration_method.md) — 20日超额收益IC=0.12，中间两档无意义；过热期用PE分位不用动量；两档简化校准规则
+- [左右侧统一架构方向2026-07-09](project-leftside-rightside-unification.md) — 单一发现流程+自动打标签，不要求用户预选左右侧，待专项时间实施
+- [工具集成完成标准](feedback_tool_integration_standard.md) — 新脚本必须真正接入技能workflow+入库，独立能跑不算完成

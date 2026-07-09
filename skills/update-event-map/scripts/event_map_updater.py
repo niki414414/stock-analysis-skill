@@ -325,7 +325,85 @@ def cmd_apply(source, date_short, label, changes_path):
     print(f"\n变更已应用到: {new_dir}")
     for tname, s in summary.items():
         print(f"  {tname}: +{s['added']}新增, ~{s['updated']}更新")
+
+    # 公司池同步：不再是SKILL.md里"记得手动做"的一步，apply时自动跑。
+    pool_summary = sync_company_pool(source, mapping_rows=additions.get("mapping"), date_short=date_short)
+    if pool_summary["added"] or pool_summary["skipped_no_code"]:
+        print(f"\n公司池同步: +{pool_summary['added']}家新增, "
+              f"{len(pool_summary['skipped_no_code'])}家无A股代码跳过"
+              f"{'(' + '、'.join(pool_summary['skipped_no_code'][:5]) + ')' if pool_summary['skipped_no_code'] else ''}")
+
     return new_dir, summary
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PART 3b: 公司池同步（原STEP 5.5，从prompt指令改为代码函数，2026-07-10）
+# ═══════════════════════════════════════════════════════════════════════
+
+def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
+    """从新增mapping行的"代表公司/公司类型"字段抽取公司名，自动补入公司.xlsx缺失的公司。
+
+    唯一的公司池写入入口——不再依赖SKILL.md里"记得手动检查"这一步。
+    返回 {"added": int, "already_exists": int, "skipped_no_code": [names]}。
+    """
+    empty_result = {"added": 0, "already_exists": 0, "skipped_no_code": []}
+    if not mapping_rows:
+        return empty_result
+    if not os.path.exists(CODE_MAP_CSV) or not os.path.exists(COMPANY_POOL):
+        return empty_result
+
+    code_map_df = pd.read_csv(CODE_MAP_CSV)
+    code_dict = dict(zip(code_map_df["name"], code_map_df["code"].astype(str).str.zfill(6)))
+
+    sheet_name = "科技公司池" if source == "tech" else "非科技公司池"
+    da_lei = "科技" if source == "tech" else "非科技"
+
+    existing = pd.read_excel(COMPANY_POOL, sheet_name=sheet_name)
+    existing_names = set(existing["公司名称"].astype(str))
+
+    new_rows = []
+    skipped = []
+    already = 0
+    batch_label = date_short or datetime.now().strftime("%m%d")
+
+    for row in mapping_rows:
+        rep = str(row.get("代表公司/公司类型", "") or "")
+        if not rep or rep == "nan":
+            continue
+        for name in re.split(r'[、，,;；/]', rep):
+            name = name.strip()
+            if not name or len(name) < 2:
+                continue
+            if name in existing_names:
+                already += 1
+                continue
+            code = code_dict.get(name)
+            if not code:
+                skipped.append(name)
+                continue
+            new_rows.append({
+                "大类":         da_lei,
+                "一级赛道":     row.get("一级赛道", ""),
+                "二级环节":     row.get("二级环节", ""),
+                "三级环节/定位": row.get("三级零部件/材料/设备", ""),
+                "公司名称":     name,
+                "市场/属性":    "A股",
+                "角色":        "代表公司/公司类型",
+                "来源批次":     f"{batch_label}公司池自动同步",
+                "关联事件ID":   row.get("事件ID", ""),
+                "入库建议":     "mapping自动同步",
+                "置信度":      "中",
+                "备注":        "",
+            })
+            existing_names.add(name)  # 防止本批次内重复添加
+
+    if new_rows:
+        combined = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True)
+        with pd.ExcelWriter(COMPANY_POOL, engine="openpyxl", mode="a",
+                            if_sheet_exists="replace") as writer:
+            combined.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    return {"added": len(new_rows), "already_exists": already, "skipped_no_code": skipped}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -725,6 +803,10 @@ def main():
     p_validate = sub.add_parser("validate", help="跨表一致性检查")
     p_validate.add_argument("--source", choices=["tech", "nonfin"], default="tech")
 
+    p_sync = sub.add_parser("sync-pool", help="手动重跑公司池同步（正常由apply自动触发，仅用于补录/调试）")
+    p_sync.add_argument("--source", choices=["tech", "nonfin"], default="tech")
+    p_sync.add_argument("--changes", required=True, help="变更JSON文件路径（读取其中的mapping新增行）")
+
     p_ids = sub.add_parser("next-ids", help="生成下一批ID")
     p_ids.add_argument("--source", choices=["tech", "nonfin"], default="tech")
     p_ids.add_argument("--table", required=True, help="表名（events/mapping/forward等）")
@@ -744,6 +826,14 @@ def main():
         cmd_migrate(args.output)
     elif args.cmd == "validate":
         cmd_validate(args.source)
+    elif args.cmd == "sync-pool":
+        with open(args.changes, encoding="utf-8") as f:
+            changes = json.load(f)
+        result = sync_company_pool(args.source, mapping_rows=changes.get("additions", {}).get("mapping"))
+        print(f"公司池同步: +{result['added']}家新增, {result['already_exists']}家已存在, "
+              f"{len(result['skipped_no_code'])}家无A股代码跳过")
+        if result["skipped_no_code"]:
+            print("  无代码跳过: " + "、".join(result["skipped_no_code"]))
     elif args.cmd == "next-ids":
         cmd_next_ids(args.source, args.table, args.count, args.sector, args.date)
 
