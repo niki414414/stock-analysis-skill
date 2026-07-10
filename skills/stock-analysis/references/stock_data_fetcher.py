@@ -650,7 +650,7 @@ def fetch_north_bound_flow_20d() -> dict:
         return {"net_flow_20d": None, "direction": "unknown", "consecutive_days": None, "source": "failed"}
 
 
-def fetch_market_breadth() -> dict:
+def fetch_market_breadth(as_of_date: str = None) -> dict:
     """全市场涨跌家数 + 涨停跌停 + 沪深300涨跌，计算"普涨/抱团分化"分歧度。
 
     背景：指数上涨不代表个股普涨——2026-07-09四大指数集体高开但超4600只个股下跌，
@@ -662,6 +662,8 @@ def fetch_market_breadth() -> dict:
       指数涨+个股涨多 → "普涨"：广度健康，正常右侧逻辑适用
       指数跌+个股涨多 → "权重股压制"：非真普跌，可能是指数成分股结构性拖累
       指数跌+个股跌多 → "普跌"：真实退潮
+
+    as_of_date: YYYYMMDD，指定回测某个历史交易日；None=取最近一个已收盘交易日（实盘用）
     """
     token = os.environ.get("TUSHARE_TOKEN")
     if not token:
@@ -670,13 +672,16 @@ def fetch_market_breadth() -> dict:
         import tushare as ts
         pro = ts.pro_api(token)
 
-        # 找最近一个已收盘交易日（避免盘中/非交易日拉到空数据）
-        today = datetime.now()
-        cal = pro.trade_cal(exchange="SSE",
-                            start_date=(today - timedelta(days=10)).strftime("%Y%m%d"),
-                            end_date=today.strftime("%Y%m%d"))
-        open_days = sorted(cal[cal["is_open"] == 1]["cal_date"].tolist(), reverse=True)
-        trade_date = open_days[1] if (open_days and open_days[0] == today.strftime("%Y%m%d") and today.hour < 16) else (open_days[0] if open_days else today.strftime("%Y%m%d"))
+        if as_of_date:
+            trade_date = as_of_date
+        else:
+            # 找最近一个已收盘交易日（避免盘中/非交易日拉到空数据）
+            today = datetime.now()
+            cal = pro.trade_cal(exchange="SSE",
+                                start_date=(today - timedelta(days=10)).strftime("%Y%m%d"),
+                                end_date=today.strftime("%Y%m%d"))
+            open_days = sorted(cal[cal["is_open"] == 1]["cal_date"].tolist(), reverse=True)
+            trade_date = open_days[1] if (open_days and open_days[0] == today.strftime("%Y%m%d") and today.hour < 16) else (open_days[0] if open_days else today.strftime("%Y%m%d"))
 
         df = pro.daily(trade_date=trade_date, fields="ts_code,pct_chg")
         if df is None or df.empty:
