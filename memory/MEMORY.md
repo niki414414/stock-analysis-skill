@@ -26,3 +26,4 @@
 - [左右侧统一架构方向2026-07-09](project-leftside-rightside-unification.md) — 单一发现流程+自动打标签，不要求用户预选左右侧，待专项时间实施
 - [工具集成完成标准](feedback_tool_integration_standard.md) — 新脚本必须真正接入技能workflow+入库，独立能跑不算完成
 - [v4.9市场分歧度+双仓位+置信度](project-tactical-position-regime-v49.md) — 抱团行情画像失效问题：分歧度信号+底仓/战术仓独立口径+判断置信度标注
+- [high_baseline口径局限](feedback_high_baseline_limitation.md) — 回踩旧高点口径对轨迹E(创新高)类型系统性失效，需要新口径捕捉市场轮动，待设计
