@@ -51,6 +51,18 @@ user_profile:
   max_total_stocks: 6
   prefer_price_range: [3, 100]
 
+  # === 战术仓/波段（2026-07-10新增）===
+  # Why: "趋势跟随+底仓持有"是2026-05-14建画像时的假设，在单边抱团行情里
+  # （追高才能进场、回撤又深）这套假设本身会导致踏空或者在右侧追高被套。
+  # 不是画像作废，是底仓管一部分仓位，战术仓单独一套更快的规则管另一部分。
+  # 触发/参数细节见 analysis-prompt-template.md 第五层"战术仓（波段）分支"。
+  tactical_position:
+    enabled: true
+    position_max_per_stock_pct: 12   # 底仓上限的一半左右，不与底仓上限混用
+    holding_period_days_max: 10      # 到期不论盈亏减仓一半，不设"继续等待"
+    stop_loss_basis: "近1-3日K线最低点"  # 比底仓的结构止损更紧
+    min_profit_loss_ratio: 2         # 和底仓一样不下调标准，下调的是止损距离和周期
+
   # === 板块认知 ===
   preferred_sectors:
     - "AI算力"

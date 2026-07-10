@@ -107,6 +107,7 @@ pip3 install akshare efinance tushare --quiet && python3 /tmp/stock_data_fetcher
 | `amplitude_3d/5d` | 近期振幅 | 辅助展示 |
 | `fund_flow_multiday.3d/5d/20d` | 主力资金流向 | 辅助展示 |
 | `sector_breadth.follow_stock_up_pct` | 板块成分股上涨比例 | 第①层 |
+| `market_environment.breadth.regime_label` | 全市场涨跌家数背离分类（普涨/抱团集中/权重股压制/普跌，2026-07-10新增）| 第①层分歧度检查 |
 | `data["etf_fund_flow"]` | 板块ETF资金 | 辅助展示 |
 | `data["chip_concentration"]` | 筹码分布 | 辅助展示 |
 | `data["volume_heat"]` | 量能热度 | 第⑥层 |
@@ -146,6 +147,9 @@ python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py window --sect
 
 ### 4a. 市场水位（第一层数据，每次分析必做）
 
+**先看STEP 2脚本输出的`market_environment.breadth`字段**——`regime_label`直接给出"普涨/抱团集中/权重股压制/普跌"分类（涨跌家数比+涨停跌停数+沪深300涨跌算出来的，不需要再WebSearch猜），尤其关注是否为"抱团/集中"（指数涨但多数个股跌，追高风险大，见analysis-prompt-template.md第一层"分歧度检查"）。
+
+再用WebSearch补充脚本覆盖不到的部分：
 ```
 WebSearch("沪深300 今日收盘 20日均线 {当前年月}")
 WebSearch("A股今日两市成交额 {当前年月}")

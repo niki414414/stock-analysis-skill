@@ -650,6 +650,94 @@ def fetch_north_bound_flow_20d() -> dict:
         return {"net_flow_20d": None, "direction": "unknown", "consecutive_days": None, "source": "failed"}
 
 
+def fetch_market_breadth() -> dict:
+    """全市场涨跌家数 + 涨停跌停 + 沪深300涨跌，计算"普涨/抱团分化"分歧度。
+
+    背景：指数上涨不代表个股普涨——2026-07-09四大指数集体高开但超4600只个股下跌，
+    是资金抱团集中在少数主线，不是普涨。这种"指数强、个股弱"的分歧本来只能靠临时
+    WebSearch才能发现，现在做成结构化字段，每次Layer 1市场水位检查自动带出来。
+
+    分歧度判断（regime_label）：
+      指数涨+个股跌多 → "抱团/集中"：追高风险大，追的是少数主线不是全market
+      指数涨+个股涨多 → "普涨"：广度健康，正常右侧逻辑适用
+      指数跌+个股涨多 → "权重股压制"：非真普跌，可能是指数成分股结构性拖累
+      指数跌+个股跌多 → "普跌"：真实退潮
+    """
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        return {"source": "unavailable", "regime_label": "unknown"}
+    try:
+        import tushare as ts
+        pro = ts.pro_api(token)
+
+        # 找最近一个已收盘交易日（避免盘中/非交易日拉到空数据）
+        today = datetime.now()
+        cal = pro.trade_cal(exchange="SSE",
+                            start_date=(today - timedelta(days=10)).strftime("%Y%m%d"),
+                            end_date=today.strftime("%Y%m%d"))
+        open_days = sorted(cal[cal["is_open"] == 1]["cal_date"].tolist(), reverse=True)
+        trade_date = open_days[1] if (open_days and open_days[0] == today.strftime("%Y%m%d") and today.hour < 16) else (open_days[0] if open_days else today.strftime("%Y%m%d"))
+
+        df = pro.daily(trade_date=trade_date, fields="ts_code,pct_chg")
+        if df is None or df.empty:
+            raise ValueError(f"daily() 在 {trade_date} 返回空")
+
+        advancers = int((df["pct_chg"] > 0).sum())
+        decliners = int((df["pct_chg"] < 0).sum())
+        total = advancers + decliners
+        advance_pct = round(advancers / total * 100, 1) if total else None
+
+        limit_up = limit_down = None
+        try:
+            lu = pro.limit_list_d(trade_date=trade_date, limit_type="U")
+            ld = pro.limit_list_d(trade_date=trade_date, limit_type="D")
+            limit_up, limit_down = len(lu), len(ld)
+        except Exception:
+            pass
+
+        index_pct_chg = None
+        try:
+            idx = pro.index_daily(ts_code="000300.SH", start_date=trade_date, end_date=trade_date)
+            if idx is not None and not idx.empty:
+                index_pct_chg = round(float(idx.iloc[0]["pct_chg"]), 2)
+        except Exception:
+            pass
+
+        # 分歧度判定（阈值以50%为界——只要涨跌家数比过半就足够定性，
+        # 不需要额外留一个"震荡/中性"死区来吸收45-55%之间明显的分歧case）
+        if index_pct_chg is None or advance_pct is None:
+            regime_label = "unknown"
+        elif index_pct_chg > 0.3 and advance_pct < 50:
+            regime_label = "抱团/集中（指数强、个股弱，追高风险大）"
+        elif index_pct_chg > 0.3 and advance_pct >= 50:
+            regime_label = "普涨（广度健康）"
+        elif index_pct_chg < -0.3 and advance_pct > 50:
+            regime_label = "权重股压制（非真普跌）"
+        elif index_pct_chg < -0.3 and advance_pct <= 50:
+            regime_label = "普跌（真实退潮）"
+        else:
+            regime_label = "震荡/中性（指数涨跌不足0.3%，看涨跌家数比：" + (
+                "偏强" if advance_pct > 55 else "偏弱" if advance_pct < 45 else "均衡") + "）"
+
+        _log(f"[Market] Breadth {trade_date}: 指数{index_pct_chg}% 上涨{advancers}/下跌{decliners} "
+             f"({advance_pct}%) 涨停{limit_up}/跌停{limit_down} → {regime_label}")
+
+        return {
+            "trade_date": trade_date,
+            "index_pct_chg": index_pct_chg,
+            "advancers": advancers,
+            "decliners": decliners,
+            "advance_pct": advance_pct,
+            "limit_up": limit_up,
+            "limit_down": limit_down,
+            "regime_label": regime_label,
+            "source": "tushare",
+        }
+    except Exception as e:
+        _log(f"[Market] Breadth fetch failed: {e}")
+        return {"source": "failed", "regime_label": "unknown"}
+
+
 def _fetch_tushare_moneyflow_df(code: str, days: int = 30):
     """
     Shared helper: fetch raw Tushare moneyflow DataFrame (5000积分+).
@@ -2339,13 +2427,15 @@ def main():
     sources_status["serpapi"] = "configured" if os.environ.get("SERPAPI_KEY") else "not set"
     _log(f"Data sources: {json.dumps(sources_status)}")
 
-    # Fetch market environment once (STEP 0 data — northbound flow)
-    _log("Fetching market environment data (northbound capital)...")
+    # Fetch market environment once (STEP 0 data — northbound flow + breadth divergence)
+    _log("Fetching market environment data (northbound capital + breadth)...")
     market_env = {
         "north_bound": fetch_north_bound_flow_20d(),
+        "breadth": fetch_market_breadth(),
     }
     _log(f"Market env: northbound direction={market_env['north_bound'].get('direction')}, "
-         f"20d_net={market_env['north_bound'].get('net_flow_20d')}亿")
+         f"20d_net={market_env['north_bound'].get('net_flow_20d')}亿, "
+         f"breadth_regime={market_env['breadth'].get('regime_label')}")
 
     for code in codes:
         try:
