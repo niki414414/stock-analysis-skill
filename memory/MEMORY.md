@@ -28,3 +28,4 @@
 - [v4.9市场分歧度+双仓位+置信度](project-tactical-position-regime-v49.md) — 抱团行情画像失效问题：分歧度信号+底仓/战术仓独立口径+判断置信度标注
 - [high_baseline口径局限](feedback_high_baseline_limitation.md) — 回踩旧高点口径对轨迹E(创新高)类型系统性失效，需要新口径捕捉市场轮动，待设计
 - [2026-07-10回测方法论复盘](project-backtest-methodology-review-20260710.md) — Minervini/Qullamaggie/RRG/Choppiness等借鉴方案backtrader规范回测后均未通过；底仓/战术仓需退回资金分配定位，待专项重做
+- [/update-framework技能](reference_update_framework_skill.md) — 改框架逻辑前必须遵循的验证规范，源于当天"先实现后验证"的教训
