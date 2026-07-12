@@ -53,8 +53,11 @@ STEP 6  输出看板（Read output-format-template.md）
 
 ```
 Read("config/user_profile.yaml")   → 加载用户画像（资金/持仓/偏好/校准日期）
-Read("config/market_status.yaml")  → 加载市场状态（主线/子赛道波次/催化质量）
+Read("config/market_status.yaml")  → 加载全市场温度（current_temperature，Layer1条件1/4备用来源）
 ```
+
+赛道阶段/优先级/位置（原来在这个yaml里）已改为查事件地图：
+`python3 scripts/event_map_query.py status --keyword {赛道}`（2026-07-12起，见market_status.yaml头部说明）
 
 校准检查：
 - 今日 >= next_calibration_date → 看板顶部输出 ⚠️ 画像校准提醒

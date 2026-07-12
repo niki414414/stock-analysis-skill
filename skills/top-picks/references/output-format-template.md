@@ -59,7 +59,6 @@
 - `distance`：`(current_price - high_baseline) / high_baseline * 100`；负数=距前高还有空间，正数=已超越
 - `high_baseline`：近120日OHLCV排除最近20日的最高价（来自 stock_data_fetcher 的 high_baseline 字段）
 - `breadth`：sector_breadth.follow_stock_up_pct × 100，即板块今日上涨股票比例
-- 如有 `wave_number = 4`：在 `catalyst_type` 后追加 `⚠️ 第4波`
 
 ---
 
