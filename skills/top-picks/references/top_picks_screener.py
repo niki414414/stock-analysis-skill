@@ -19,6 +19,32 @@ from datetime import datetime, timedelta
 
 warnings.filterwarnings("ignore")
 
+sys.path.insert(0, os.path.expanduser("~/.claude/skills/stock-analysis/scripts"))
+from event_map_query import find_latest_csv_dir, load_csv as _load_event_map_csv  # noqa: E402
+
+
+def load_sector_status() -> dict:
+    """
+    从事件地图 sectors_status.csv 读取赛道阶段/优先级/位置——
+    这是赛道判断的唯一数据源（2026-07-12起，替代原 market_status.yaml sub_sectors，
+    见 event_map_query.py 的 status 子命令，两者读同一份表）。
+    返回 {sector_id: {label, theme, priority, stage, style_position}}。
+    """
+    df, _ = _load_event_map_csv(find_latest_csv_dir("tech"), "sectors_status")
+    meta = {}
+    for _, row in df.iterrows():
+        sid = str(row.get("sector_id", "")).strip()
+        if not sid:
+            continue
+        meta[sid] = {
+            "label":          str(row.get("sub_sector", sid)),
+            "theme":          str(row.get("theme", "")),
+            "priority":       int(row.get("priority", 3)) if str(row.get("priority", "")).strip() else 3,
+            "stage":          str(row.get("stage", "")) if str(row.get("stage", "")) != "nan" else "",
+            "style_position": str(row.get("style_position", "")) if str(row.get("style_position", "")) != "nan" else "",
+        }
+    return meta
+
 
 def _load_env_file():
     env_path = os.path.expanduser("~/.claude/skills/.env")
@@ -156,10 +182,10 @@ def get_last_trading_date_str() -> str:
 #   备选路径：动态爬取概念板块（仅 --force-rebuild 时触发，用于季度维护）
 # ============================================================
 
-def load_static_universe(static_path: str, market_status_path: str) -> list:
+def load_static_universe(static_path: str) -> list:
     """
-    从静态 YAML 加载宇宙池，并与 market_status.yaml 中的 stage/priority/style_position 合并。
-    无需任何外部 API 调用，执行时间 < 0.1 秒。
+    从静态 YAML 加载宇宙池，并与事件地图 sectors_status.csv 中的
+    stage/priority/style_position 合并。无需任何外部 API 调用，执行时间 < 0.1 秒。
     """
     try:
         import yaml
@@ -170,38 +196,25 @@ def load_static_universe(static_path: str, market_status_path: str) -> list:
     with open(static_path) as f:
         static_data = yaml.safe_load(f)
 
-    # 从 market_status.yaml 读取最新的 stage / priority / style_position
-    ss_meta: dict = {}
-    theme_labels: dict = {}
     try:
-        with open(market_status_path) as f:
-            ms = yaml.safe_load(f)
-        for theme_key, theme_data in ms.get("theme_framework", {}).items():
-            theme_labels[theme_key] = theme_data.get("label", theme_key)
-            for ss_key, ss_data in theme_data.get("sub_sectors", {}).items():
-                ss_meta[ss_key] = {
-                    "label":          ss_data.get("label", ss_key),
-                    "stage":          ss_data.get("stage", ""),
-                    "style_position": ss_data.get("style_position", ""),
-                    "priority":       ss_data.get("priority", 3),
-                }
+        ss_meta = load_sector_status()
     except Exception as e:
-        _log(f"market_status.yaml load warning: {e}; using subsector defaults")
+        _log(f"sectors_status.csv load warning: {e}; using subsector defaults")
+        ss_meta = {}
 
     # ── 构建宇宙池条目（允许同一股票跨多个子赛道出现）────────────
     seen_pairs: set = set()  # (code, ss_key) 去重
     result: list   = []
 
     def _make_entry(code, name, ss_key, theme_key, tier, tradeable):
-        meta    = ss_meta.get(ss_key, {})
-        t_label = theme_labels.get(theme_key, theme_key)
+        meta = ss_meta.get(ss_key, {})
         return {
             "code":            code,
             "name":            name,
             "subsector_key":   ss_key,
             "subsector_label": meta.get("label", ss_key),
             "theme":           theme_key,
-            "theme_label":     t_label,
+            "theme_label":     meta.get("theme", theme_key),
             "priority":        meta.get("priority", 3),
             "stage":           meta.get("stage", ""),
             "style_position":  meta.get("style_position", ""),
@@ -300,7 +313,7 @@ def fetch_concept_stocks(board_name: str) -> list:
         return []
 
 
-def build_universe(market_status_path: str, force_rebuild: bool = False) -> list:
+def build_universe(force_rebuild: bool = False) -> list:
     """
     构建宇宙池。
     - 默认（推荐）：从静态 stock_universe.yaml 加载，无 API 调用，速度最快
@@ -311,7 +324,7 @@ def build_universe(market_status_path: str, force_rebuild: bool = False) -> list
 
     # ── 优先：静态宇宙池（无 API，< 0.1s）──────────────────────
     if not force_rebuild and os.path.exists(STATIC_UNIVERSE_PATH):
-        result = load_static_universe(STATIC_UNIVERSE_PATH, market_status_path)
+        result = load_static_universe(STATIC_UNIVERSE_PATH)
         if len(result) >= 50:
             with open(cache_path, "w") as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
@@ -328,71 +341,61 @@ def build_universe(market_status_path: str, force_rebuild: bool = False) -> list
         _log(f"Cached universe: {len(cached)} stocks")
         return cached
 
-    # 重新构建
-    try:
-        import yaml
-    except ImportError:
-        os.system("pip3 install pyyaml --quiet")
-        import yaml
-
-    with open(market_status_path) as f:
-        ms = yaml.safe_load(f)
-
-    theme_framework = ms.get("theme_framework", {})
+    # 重新构建：赛道元数据统一来自事件地图 sectors_status.csv
+    ss_meta = load_sector_status()
 
     _log("Fetching all concept board names...")
     all_boards = fetch_all_concept_boards()
 
     universe: dict = {}
 
-    for theme_key, theme_data in theme_framework.items():
-        theme_label = theme_data.get("label", theme_key)
-        for ss_key, ss_data in theme_data.get("sub_sectors", {}).items():
-            ss_label   = ss_data.get("label", ss_key)
-            priority   = ss_data.get("priority", 3)
-            stage      = ss_data.get("stage", "")
-            style_pos  = ss_data.get("style_position", "")
+    for ss_key, meta in ss_meta.items():
+        ss_label   = meta.get("label", ss_key)
+        theme_key  = meta.get("theme", ss_key)
+        priority   = meta.get("priority", 3)
+        stage      = meta.get("stage", "")
+        style_pos  = meta.get("style_position", "")
 
-            keywords = SUBSECTOR_KEYWORDS.get(ss_key, [ss_label])
-            matched  = match_boards(all_boards, keywords) if all_boards else []
+        keywords = SUBSECTOR_KEYWORDS.get(ss_key, [ss_label])
+        matched  = match_boards(all_boards, keywords) if all_boards else []
 
-            if not matched:
-                _log(f"  [{ss_key}] no matching boards, skip")
-                continue
+        if not matched:
+            _log(f"  [{ss_key}] no matching boards, skip")
+            continue
 
-            for board in matched[:2]:
-                codes = fetch_concept_stocks(board)
-                new_count = 0
-                for code in codes:
-                    if code.startswith("688"):  # 科创板
-                        continue
-                    if code not in universe:
-                        universe[code] = {
-                            "code": code,
+        for board in matched[:2]:
+            codes = fetch_concept_stocks(board)
+            new_count = 0
+            for code in codes:
+                if code.startswith("688"):  # 科创板
+                    continue
+                if code not in universe:
+                    universe[code] = {
+                        "code": code,
+                        "subsector_key": ss_key,
+                        "subsector_label": ss_label,
+                        "theme": theme_key,
+                        "theme_label": theme_key,
+                        "priority": priority,
+                        "stage": stage,
+                        "style_position": style_pos,
+                        "matched_board": board,
+                    }
+                    new_count += 1
+                else:
+                    existing = universe[code]
+                    if priority < existing.get("priority", 99):
+                        existing.update({
                             "subsector_key": ss_key,
                             "subsector_label": ss_label,
                             "theme": theme_key,
-                            "theme_label": theme_label,
+                            "theme_label": theme_key,
                             "priority": priority,
                             "stage": stage,
                             "style_position": style_pos,
                             "matched_board": board,
-                        }
-                        new_count += 1
-                    else:
-                        existing = universe[code]
-                        if priority < existing.get("priority", 99):
-                            existing.update({
-                                "subsector_key": ss_key,
-                                "subsector_label": ss_label,
-                                "theme": theme_key,
-                                "theme_label": theme_label,
-                                "priority": priority,
-                                "stage": stage,
-                                "style_position": style_pos,
-                                "matched_board": board,
-                            })
-                _log(f"  [{ss_key}] '{board}': {len(codes)} stocks, {new_count} new")
+                        })
+            _log(f"  [{ss_key}] '{board}': {len(codes)} stocks, {new_count} new")
 
     result = list(universe.values())
     _log(f"Universe total after dedup: {len(result)} stocks")
@@ -967,9 +970,6 @@ def _theme_breakdown(universe: list) -> dict:
     return counts
 
 
-MARKET_STATUS_DEFAULT = os.path.expanduser(
-    "~/.claude/skills/stock-analysis/config/market_status.yaml"
-)
 UNIVERSE_DEFAULT = "/tmp/tp_universe.json"
 SCREEN_CACHE_PREFIX = "/tmp/tp_screen_"
 STATIC_UNIVERSE_PATH = os.path.expanduser(
@@ -988,7 +988,6 @@ def _screen_cache_valid() -> bool:
 def main():
     parser = argparse.ArgumentParser(description="Top Picks Screener — 四大主线漏斗选股")
     parser.add_argument("--phase", choices=["universe", "screen"], required=True)
-    parser.add_argument("--market-status", default=MARKET_STATUS_DEFAULT)
     parser.add_argument("--universe",       default=UNIVERSE_DEFAULT)
     parser.add_argument("--force-rebuild",  action="store_true",
                         help="强制重建宇宙池，忽略7天缓存")
@@ -998,7 +997,7 @@ def main():
 
     if args.phase == "universe":
         try:
-            universe = build_universe(args.market_status, force_rebuild=args.force_rebuild)
+            universe = build_universe(force_rebuild=args.force_rebuild)
             with open(UNIVERSE_DEFAULT, "w") as f:
                 json.dump(universe, f, ensure_ascii=False, indent=2)
             _log(f"Universe saved → {UNIVERSE_DEFAULT}")
