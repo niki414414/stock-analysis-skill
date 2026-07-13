@@ -147,6 +147,7 @@ SUBSECTOR_KEYWORDS = {
     "ai_network_infra":       ["交换机", "高速连接", "连接器"],
     "power_nuclear":          ["核电", "核能", "小堆", "SMR"],
     "satellite_comms":        ["卫星互联网", "低轨卫星", "空天通信", "卫星通信"],
+    "commercial_space":       ["商业航天", "航天军工", "卫星导航"],
     "passive_components":     ["MLCC", "被动元件", "电感", "片式电阻", "陶瓷电容"],
 
     # 无人驾驶

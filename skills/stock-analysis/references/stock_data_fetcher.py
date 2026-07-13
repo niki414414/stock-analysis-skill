@@ -788,11 +788,31 @@ def fetch_stock_fund_flow(code: str) -> dict:
         retail_net_yi = round((buy_sm  - sell_sm)  / 10000, 4) if buy_sm  is not None and sell_sm  is not None else None
         direction = "净流入" if (main_net_yi or 0) > 0 else "净流出"
         _log(f"[{code}] Main force (Tushare): {direction} {main_net_yi}亿")
+
+        # 展示用：大单/小单资金方向背离（不参与打分）
+        # 口径警示：主力/散户是按单笔委托金额分桶（超大单+大单=主力，小单=散户），
+        # 不是投资者身份识别——算法拆单会让机构资金显示为小单，固定金额门槛对高价股
+        # 天然更容易把普通散户单归入大单。方向一致时（同步流入/流出）不构成身份判断，
+        # 不加免责声明；方向背离时最容易被误读成"机构行为"，必须带上口径说明。
+        main_retail_divergence = None
+        if main_net_yi is not None and retail_net_yi is not None:
+            if main_net_yi > 0 and retail_net_yi < 0:
+                main_retail_divergence = ("大单净流入+小单净流出（模式类似吸筹，"
+                    "但按委托金额分桶不代表投资者身份，算法拆单/高价股金额门槛会失真）")
+            elif main_net_yi < 0 and retail_net_yi > 0:
+                main_retail_divergence = ("大单净流出+小单净流入（模式类似派发，"
+                    "但按委托金额分桶不代表投资者身份，算法拆单/高价股金额门槛会失真）")
+            elif main_net_yi > 0 and retail_net_yi > 0:
+                main_retail_divergence = "大单小单同步净流入"
+            elif main_net_yi < 0 and retail_net_yi < 0:
+                main_retail_divergence = "大单小单同步净流出"
+
         return {
             "main_force_net_yi": main_net_yi,
             "super_large_net_yi": super_net_yi,
             "large_net_yi": large_net_yi,
             "retail_net_yi": retail_net_yi,
+            "main_retail_divergence": main_retail_divergence,
             "direction": "inflow" if (main_net_yi or 0) > 0 else "outflow",
             "source": "tushare_moneyflow",
         }
@@ -846,11 +866,26 @@ def fetch_stock_fund_flow(code: str) -> dict:
 
         direction = "净流入" if (main_net or 0) > 0 else "净流出"
         _log(f"[{code}] Main force: {direction} {main_net}亿")
+
+        main_retail_divergence = None
+        if main_net is not None and small_net is not None:
+            if main_net > 0 and small_net < 0:
+                main_retail_divergence = ("大单净流入+小单净流出（模式类似吸筹，"
+                    "但按委托金额分桶不代表投资者身份，算法拆单/高价股金额门槛会失真）")
+            elif main_net < 0 and small_net > 0:
+                main_retail_divergence = ("大单净流出+小单净流入（模式类似派发，"
+                    "但按委托金额分桶不代表投资者身份，算法拆单/高价股金额门槛会失真）")
+            elif main_net > 0 and small_net > 0:
+                main_retail_divergence = "大单小单同步净流入"
+            elif main_net < 0 and small_net < 0:
+                main_retail_divergence = "大单小单同步净流出"
+
         return {
             "main_force_net_yi": main_net,
             "super_large_net_yi": super_net,
             "large_net_yi": large_net,
             "retail_net_yi": small_net,
+            "main_retail_divergence": main_retail_divergence,
             "direction": "inflow" if (main_net or 0) > 0 else "outflow",
             "source": "akshare_eastmoney",
         }
@@ -881,6 +916,36 @@ def fetch_fund_flow_multiday(code: str) -> dict:
             if result.get(key) is not None and abs(result[key]) > max_yi:
                 _log(f"[{code}] {key}={result[key]}亿 exceeds threshold, discarding")
                 result[key] = None
+
+        # 展示用：资金流动量（5日日均 vs 20日日均，判断加速/减速，不参与打分）
+        f5d, f20d = result.get("fund_flow_5d"), result.get("fund_flow_20d")
+        if f5d is not None and f20d is not None:
+            avg5, avg20 = f5d / 5, f20d / 20
+            result["fund_flow_avg5d_yi"] = round(avg5, 4)
+            result["fund_flow_avg20d_yi"] = round(avg20, 4)
+            if avg5 > 0 and avg20 > 0:
+                result["fund_flow_momentum"] = "加速流入" if avg5 > avg20 * 1.2 else \
+                    ("流入放缓" if avg5 < avg20 * 0.8 else "流入稳定")
+            elif avg5 < 0 and avg20 < 0:
+                result["fund_flow_momentum"] = "加速流出" if avg5 < avg20 * 1.2 else \
+                    ("流出放缓" if avg5 > avg20 * 0.8 else "流出稳定")
+            elif avg5 > 0 and avg20 <= 0:
+                result["fund_flow_momentum"] = "由流出转流入"
+            elif avg5 <= 0 and avg20 > 0:
+                result["fund_flow_momentum"] = "由流入转流出"
+
+        # 展示用：资金流稳定性（近5日/20日标准差，区分持续建仓 vs 大进大出博弈）
+        tail5 = series_yi.tail(5)
+        tail20 = series_yi.tail(20)
+        if len(tail5) >= 3:
+            result["fund_flow_std5d_yi"] = round(float(tail5.std()), 4)
+        if len(tail20) >= 5:
+            std20 = float(tail20.std())
+            result["fund_flow_std20d_yi"] = round(std20, 4)
+            mean_abs20 = float(tail20.abs().mean())
+            if mean_abs20 > 0:
+                result["fund_flow_stability"] = "稳定持续" if std20 < mean_abs20 * 1.2 else "大进大出"
+
         _log(f"[{code}] Fund flow 5d={result.get('fund_flow_5d')}亿 20d={result.get('fund_flow_20d')}亿 (Tushare)")
         return result
     # Priority 1: akshare fallback
@@ -959,7 +1024,7 @@ def fetch_tushare_chip_dist(code: str) -> dict:
         import tushare as ts
         pro = ts.pro_api(token)
         ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
-        start = (datetime.now() - timedelta(days=10)).strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=16)).strftime("%Y%m%d")
         end = datetime.now().strftime("%Y%m%d")
         df = pro.cyq_perf(ts_code=ts_code, start_date=start, end_date=end)
         if df is None or df.empty:
@@ -988,8 +1053,25 @@ def fetch_tushare_chip_dist(code: str) -> dict:
             interp = "套牢盘比例高，解套抛压明显"
 
         _log(f"[{code}] Chip dist (Tushare): winner={winner_rate}%, weight_avg={weight_avg}")
+
+        # 展示用：获利盘比例的5日变化速度，而非静态值（不参与打分）
+        winner_rate_chg_5d = None
+        winner_rate_trend = None
+        if len(df) >= 6:
+            prior = _safe_float(df.iloc[-6].get("winner_rate"))
+            if prior is not None and winner_rate is not None:
+                winner_rate_chg_5d = round(winner_rate - prior, 4)
+                if winner_rate_chg_5d > 5:
+                    winner_rate_trend = "获利盘快速上升"
+                elif winner_rate_chg_5d < -5:
+                    winner_rate_trend = "获利盘快速下降（套牢盘增加）"
+                else:
+                    winner_rate_trend = "获利盘稳定"
+
         return {
             "winner_rate": winner_rate,
+            "winner_rate_chg_5d": winner_rate_chg_5d,
+            "winner_rate_trend": winner_rate_trend,
             "weight_avg": weight_avg,
             "cost_5pct":  cost_5pct,
             "cost_15pct": cost_15pct,
@@ -1111,18 +1193,68 @@ def fetch_sector_breadth(sector: str) -> dict:
 
 # ETF代码映射（tushare行业名称 → 相关ETF代码列表）
 # 仅用于维度3 ETF资金共识子指标；用户可按需扩充
+# 2026-07-13 全表核对：用户在同花顺发现"通信ETF银华(159994)"不在原映射里，抽查后发现原表
+# 半数以上代码配错了（可能是历史某次编写时手滑/记错）——516090其实是新能源ETF易方达，
+# 159869其实是游戏ETF华夏，跟"通信设备"毫无关系；类似问题还出现在计算机设备/软件开发/
+# 电气设备/汽车零部件/电源设备。逐个用 akshare fund_etf_spot_em() 按名称关键词+成交额排序
+# 重新核实替换，标注"0713修正"的都是本次改动。电源设备、非金属矿物没有精确对应的ETF，
+# 用主题相近的做松散代理，标注了精度打折，不是权威匹配。
 _SECTOR_ETF_MAP = {
-    "通信设备":    ["516090", "159869"],    # 通信ETF / 5G ETF
-    "半导体及元件": ["512480", "159996"],   # 半导体ETF / 芯片ETF
-    "电子制造":    ["512480", "159516"],    # 半导体ETF / 科创芯片ETF
-    "计算机设备":  ["516780", "159449"],    # AI ETF / 科创100
-    "软件开发":    ["516780", "159449"],
-    "电气设备":    ["516890", "159611"],    # 电力ETF
-    "机械制造":    ["562500", "159551"],    # 机器人ETF
-    "汽车零部件":  ["159608", "516110"],    # 智驾ETF
-    "电源设备":    ["159941"],              # 新能源ETF
-    "非金属矿物":  ["512480"],
+    "通信设备":    ["515880", "515050", "159994"],  # 通信ETF国泰/华夏/银华，按成交额排序（0713修正：原代码是新能源+游戏ETF，完全配错）
+    "半导体及元件": ["512480", "159516"],   # 半导体ETF国联安 / 半导体设备ETF国泰（0713修正：原159996是家电ETF，配错）
+    "电子制造":    ["512480", "159516"],    # 半导体ETF国联安 / 半导体设备ETF国泰，已核实正确
+    "元器件":      ["515260"],              # 电子ETF华宝，覆盖PCB/消费电子/半导体（2026-07-13验证有效）
+    "计算机设备":  ["159998", "512720"],    # 计算机ETF天弘/国泰（0713修正：原516780是稀土ETF，159449代码不存在，配错）
+    "软件开发":    ["159852", "515230"],    # 软件ETF嘉实/国泰（0713修正：原代码跟"计算机设备"一样是错的）
+    "电气设备":    ["159326", "159611"],    # 电网设备ETF华夏 / 电力ETF广发（0713修正：原516890是新材料ETF，配错）
+    "机械制造":    ["562500", "159551"],    # 机器人ETF华夏/国泰，已核实正确
+    "汽车零部件":  ["516110", "516520"],    # 汽车ETF国泰 / 智能驾驶ETF华泰柏瑞（0713修正：原159608是稀有金属ETF，配错）
+    "电源设备":    ["159732", "159997"],    # 消费电子ETF华夏 / 电子ETF天弘（0713修正：原159941是纳指ETF，离谱；电源设备无专门ETF，此为松散近似代理，精度打折）
+    "非金属矿物":  ["512400"],              # 有色金属ETF南方（0713修正：原512480是半导体ETF，配错；非金属矿物无精确对应ETF，此为松散近似代理，精度存疑）
 }
+
+
+def _fetch_etf_share_change(etf_codes: list) -> dict:
+    """
+    展示用：ETF真实净申购/赎回（份额变化），比折溢价率更直接反映资金真实进出
+    （折溢价率是套利驱动，可能不代表方向性资金；份额变化是真实申赎的直接证据）。
+    数据源：Tushare fund_share。不参与打分，仅展示。
+    """
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token or not _check_source("tushare"):
+        return {}
+    try:
+        import tushare as ts
+        pro = ts.pro_api(token)
+        start = (datetime.now() - timedelta(days=10)).strftime("%Y%m%d")
+        end = datetime.now().strftime("%Y%m%d")
+        share_chg_pct_list = []
+        for code in etf_codes:
+            ts_code = f"{code}.SH" if code.startswith(("51", "56", "58")) else f"{code}.SZ"
+            df = pro.fund_share(ts_code=ts_code, start_date=start, end_date=end)
+            if df is None or df.empty or "fd_share" not in df.columns:
+                continue
+            df = df.sort_values("trade_date")
+            if len(df) < 2:
+                continue
+            latest_share = _safe_float(df.iloc[-1].get("fd_share"))
+            prior_share = _safe_float(df.iloc[-2].get("fd_share"))
+            if latest_share is None or prior_share is None or prior_share == 0:
+                continue
+            chg_pct = round((latest_share - prior_share) / prior_share * 100, 4)
+            share_chg_pct_list.append(chg_pct)
+        if not share_chg_pct_list:
+            return {}
+        avg_chg = round(sum(share_chg_pct_list) / len(share_chg_pct_list), 4)
+        return {
+            "etf_share_chg_pct": avg_chg,
+            "etf_share_trend": "真实净申购（份额增加）" if avg_chg > 0.5 else
+                               ("真实净赎回（份额减少）" if avg_chg < -0.5 else "份额基本平稳"),
+            "etf_share_source": "tushare_fund_share",
+        }
+    except Exception as e:
+        _log(f"ETF share change failed: {e}")
+        return {}
 
 
 def fetch_etf_fund_flow(sector: str) -> dict:
@@ -1184,7 +1316,9 @@ def fetch_etf_fund_flow(sector: str) -> dict:
             "etf_codes_checked": etf_codes,
             "source": "akshare_etf_spot",
         }
-        _log(f"[{sector}] ETF flow: premium={avg_premium}, vol_ratio={avg_vol_ratio}")
+        result.update(_fetch_etf_share_change(etf_codes))  # 展示用：真实份额变化，不覆盖折溢价率
+        _log(f"[{sector}] ETF flow: premium={avg_premium}, vol_ratio={avg_vol_ratio}, "
+             f"share_chg={result.get('etf_share_chg_pct')}")
         return result
     except Exception as e:
         _log(f"[{sector}] ETF fund flow failed: {e}")
@@ -1936,6 +2070,58 @@ def calc_volume_heat(realtime: dict) -> dict:
     return result
 
 
+def calc_fund_flow_ratios(capital_flow: dict, fund_flow_multiday: dict, realtime: dict) -> dict:
+    """
+    资金流的跨字段比值分析——全部为展示用途，不参与trend_score打分，
+    不构成新的买卖判断依据（2026-07-13新增，research_log.md有对应条目）。
+
+    - fund_flow_intensity: 资金净流入 / 流通市值，归一化后可跨股票比较
+      （对比 calc_volume_heat 的 power_weight_ratio 只归一化了成交额，没归一化资金流本身）
+    - price_flow_divergence: 涨跌幅方向 与 主力资金方向 是否一致
+    """
+    result = {}
+
+    def to_yi(val):
+        if val is None:
+            return None
+        v = float(val)
+        if abs(v) > 1e7:
+            return v / 1e8
+        elif abs(v) > 1e3:
+            return v / 1e4
+        return v
+
+    main_net_yi = (capital_flow or {}).get("fund_flow", {}).get("main_force_net_yi")
+    circ_mv_yi = to_yi((realtime or {}).get("circ_mv"))
+
+    if main_net_yi is not None and circ_mv_yi and circ_mv_yi > 0:
+        intensity = round(main_net_yi / circ_mv_yi * 100, 4)
+        result["fund_flow_intensity"] = intensity
+        if intensity > 3:
+            result["fund_flow_intensity_level"] = "极强净流入（相对流通市值）"
+        elif intensity > 1:
+            result["fund_flow_intensity_level"] = "明显净流入"
+        elif intensity > -1:
+            result["fund_flow_intensity_level"] = "中性"
+        elif intensity > -3:
+            result["fund_flow_intensity_level"] = "明显净流出"
+        else:
+            result["fund_flow_intensity_level"] = "极强净流出（相对流通市值）"
+
+    change_pct = (realtime or {}).get("change_pct")
+    if change_pct is not None and main_net_yi is not None:
+        if change_pct > 0 and main_net_yi < 0:
+            result["price_flow_divergence"] = "涨但主力流出（缺乏真实承接，警惕对倒拉升）"
+        elif change_pct < 0 and main_net_yi > 0:
+            result["price_flow_divergence"] = "跌但主力流入（可能是逢跌吸筹）"
+        elif change_pct > 0 and main_net_yi > 0:
+            result["price_flow_divergence"] = "涨且主力流入（一致，健康）"
+        elif change_pct < 0 and main_net_yi < 0:
+            result["price_flow_divergence"] = "跌且主力流出（一致，无异常）"
+
+    return result
+
+
 def calc_chip_concentration(ohlcv: list, current_price: float) -> dict:
     """
     Simplified chip concentration analysis using volume profile.
@@ -2364,6 +2550,8 @@ def analyze_stock(code: str, days: int = 120, fetch_news: bool = False) -> dict:
         # Override VWAP estimate fields with real Tushare data
         chip_concentration.update({
             "in_profit_vol_pct": chip_dist_real.get("winner_rate"),   # real 获利盘%
+            "in_profit_chg_5d":  chip_dist_real.get("winner_rate_chg_5d"),   # 展示用：变化速度而非静态值
+            "in_profit_trend":   chip_dist_real.get("winner_rate_trend"),
             "weight_avg_real":   chip_dist_real.get("weight_avg"),    # 加权平均成本
             "cost_50pct":        chip_dist_real.get("cost_50pct"),    # 中位成本
             "cost_85pct":        chip_dist_real.get("cost_85pct"),    # 85%成本（上方压力参考）
@@ -2374,6 +2562,9 @@ def analyze_stock(code: str, days: int = 120, fetch_news: bool = False) -> dict:
 
     # Pool 2 momentum signal (动能视角检查清单)
     momentum_signal = calc_momentum_signal(ohlcv, chip_concentration)
+
+    # 资金流比值分析（展示用，不参与打分，2026-07-13新增）
+    fund_flow_ratios = calc_fund_flow_ratios(capital_flow, fund_flow_multiday, realtime)
 
     result = {
         "code": display,
@@ -2403,6 +2594,7 @@ def analyze_stock(code: str, days: int = 120, fetch_news: bool = False) -> dict:
         "volume_heat": volume_heat,
         "chip_concentration": chip_concentration,
         "momentum_signal": momentum_signal,
+        "fund_flow_ratios": fund_flow_ratios,
         "recent_bars": ohlcv[-10:],
         "total_bars": len(ohlcv),
         "fetch_time": datetime.now().isoformat(),
