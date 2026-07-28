@@ -1,5 +1,6 @@
 # Memory Index
 
+- [Market Outlook 2.0（2026-07-28）](project-market-outlook-v2-20260728.md) — 异常原因核验、非科技轮动雷达、影子回测边界及已知限制
 - [P0执行记录2026-07-24](project-p0-execution-20260724.md) — 排除北交所、补齐mapping，并修复既有公司不追加事件ID的结构性问题
 - [质量复利筛选技能2026-07-21](project-quality-compounder-skill-20260721.md) — 沪深300十年质量价值筛选器的设计、口径与已完成验证
 - [Tushare管线扩充2026-07-17](project-tushare-pipeline-expansion-20260717.md) — 两融、资金流、技术因子、机构占比及业绩质量字段扩充
