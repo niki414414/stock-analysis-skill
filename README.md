@@ -44,3 +44,16 @@ cp -r stock-analysis-skill/memory/* ~/.claude/projects/-Users-niki/memory/
 
 不再单独生成"迁移包"文件夹快照。每次框架有实质性改动（版本升级、新增回测结论、
 数据源变更）时，直接在本仓库提交一次 commit，git log 本身就是版本记录。
+
+## 本地离线迁移包
+
+GitHub用于异地版本备份；本地迁移包用于无网络恢复完整Git历史和活动数据：
+
+```bash
+python3 scripts/create_local_backup.py
+python3 scripts/create_local_backup.py --verify \
+  "$TZ_CODEX_HOME/迁移归档/tz-codex-backup-YYYYMMDD-HHMMSS.zip"
+```
+
+迁移包包含当前Git源码快照、完整Git bundle、事件地图、公司池、研究材料、分析记录、
+持仓和SHA-256清单。`.env`、Git凭据、日志和缓存明确排除。

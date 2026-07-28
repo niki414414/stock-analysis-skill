@@ -1,5 +1,6 @@
 # Memory Index
 
+- [本地离线迁移包机制2026-07-28](project-local-backup-20260728.md) — Git bundle+活动数据+SHA-256自动复验；明确排除.env和Git凭据
 - [market-outlook迁移与数据口径修正2026-07-28](project-market-outlook-migration-20260728.md) — 从迁移包恢复大盘状态机；修正两融汇总、资金流代理和单位换算；待真实Tushare在线验收
 - [股票技能体系项目](stock-skills-project.md) — 两个技能的框架设计、关键规则决策和数据源现状，用于跨会话延续开发
 - [数据源优先级](feedback_data_source.md) — Tushare主，akshare/东方财富备选；含单位换算和超时处理要求
