@@ -1,0 +1,26 @@
+# quality-compounder 阈值配置
+# 改这里调筛选严格度，不要改代码里的常量
+
+# ---- Stage 1：全量化漏斗 ----
+pe_ttm_max: 30                # PE(TTM)上限
+lookback_years: 10            # 要求的完整年报年数
+benchmark_rate: 0.035         # 银行理财平均收益基准，10年净利润CAGR门槛
+max_down_years: 3             # 10年区间内允许的净利润同比下滑年数上限（9次同比比较中）
+top_n_rank_required: 3        # 最近一年净利润须排在10年区间内前N高（防止"曾经辉煌已过巅峰"）
+require_positive_revenue_cagr: true   # 营收CAGR同步为正，防止纯降本/一次性损益假增长
+
+exclude_industry_keywords:    # Tushare stock_basic.industry 字段模糊匹配剔除
+  - 银行
+  - 保险
+  - 证券
+  - 多元金融
+  - 全国地产
+  - 商品城
+
+# ---- Stage 2：质量代理指标（仅展示+软性标注，不做硬性剔除） ----
+quality_lookback_years: 5     # 质量指标趋势对比的回溯年数
+ocf_to_profit_flag: 80        # 经营现金流/净利润(%) 低于此值标注"盈利质量需关注"
+debt_to_assets_flag: 60       # 资产负债率(%) 高于此值标注"杠杆偏高"（行业无关粗筛，仅供参考）
+
+# ---- 缓存 ----
+constituents_cache_days: 30   # 成分股缓存有效期（季度调整，留缓冲）

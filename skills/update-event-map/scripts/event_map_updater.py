@@ -12,8 +12,8 @@
 用法：
   python3 event_map_updater.py status
   python3 event_map_updater.py apply --date 0621 --label weekly --changes /tmp/changes.json
-  python3 event_map_updater.py export-excel --output "$TZ_CODEX_HOME/技能数据/科技产业事件/621.xlsx"
-  python3 event_map_updater.py migrate --output "$TZ_CODEX_HOME/迁移包_20260621"
+  python3 event_map_updater.py export-excel --output ~/Desktop/tz/技能数据/科技产业事件/621.xlsx
+  python3 event_map_updater.py migrate --output ~/Desktop/tz/技能数据/迁移包_20260621
   python3 event_map_updater.py validate
   python3 event_map_updater.py next-ids --table events --count 3
 """
@@ -39,11 +39,13 @@ TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
 COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
 CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
-CHATGPT_MIGRATE = os.path.join(WORKSPACE_ROOT, "迁移归档")
+CHATGPT_MIGRATE = os.path.join(DATA_ROOT, "chatgpt迁移包")
 SKILL_DIR = os.path.join(REPO_ROOT, "skills", "update-event-map")
-QUERY_SCRIPT = os.path.join(
-    REPO_ROOT, "skills", "stock-analysis", "scripts", "event_map_query.py"
-)
+QUERY_SCRIPT = os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts", "event_map_query.py")
+SECTORS_STATUS_CROSSWALK_CSV = os.path.join(SKILL_DIR, "config", "sectors_status_crosswalk.csv")
+
+# 用户2026-07-23明确表态不参与北交所，公司池同步时排除掉（不构建/维护BJ的ts_code后缀支持）
+BJ_CODE_PREFIXES = ("83", "87", "88", "92", "43")
 
 # ── 科技版列定义 ─────────────────────────────────────────────────────
 TECH_TABLES = {
@@ -104,10 +106,14 @@ TECH_TABLES = {
     "sectors_status": {
         "prefix": "sectors_status",
         "id_col": "sector_id",
-        "cols": ["sector_id", "theme", "sub_sector", "stage", "wave_number",
-                 "wave_position", "signal_stock_code", "catalyst_quality",
-                 "ai_correlation", "priority", "style_position", "event_map_status",
-                 "last_updated", "note"],
+        # 2026-07-22精简：删除wave_number/wave_position/catalyst_quality/
+        # ai_correlation/priority/style_position——排查发现这6个字段在现行框架里
+        # 零消费方（只被已归档的analysis-prompt-template-v2.md和已下线的
+        # top_picks_screener.py引用，见feedback_sectors_status_sync_redesign）。
+        # stage保留：output-format-template.md仍用它做展示+过时性自查（非决策输入，
+        # analysis-prompt-template.md的破位升级路径①已改用corrections表+活跃催化）。
+        "cols": ["sector_id", "theme", "sub_sector", "stage",
+                 "signal_stock_code", "event_map_status", "last_updated", "note"],
     },
 }
 
@@ -272,6 +278,55 @@ def create_new_version(source, date_short, label):
     return new_dir
 
 
+def _autofill_ids(tname, tdef, existing_df, new_df, date_short):
+    """兜底：changes.json里漏填主键ID的新增行，在写入前自动补上，不再依赖调用方记得填。
+
+    2026-07-14/15同一session里连续三次漏填映射ID导致空主键行污染validate输出
+    （见memory: feedback_event_map_id_field_bug），这里把兜底直接写死在apply()里，
+    而不是继续指望prompt提醒。
+    """
+    id_col = tdef.get("id_col")
+    if not id_col or id_col not in new_df.columns:
+        return new_df
+
+    blank_mask = new_df[id_col].isna() | (new_df[id_col].astype(str).str.strip() == "")
+    if not blank_mask.any():
+        return new_df
+
+    existing_ids = set(existing_df[id_col].astype(str).tolist()) if existing_df is not None and not existing_df.empty else set()
+    existing_ids |= set(new_df.loc[~blank_mask, id_col].astype(str).tolist())
+
+    # date_short可能是"0715"(4位)或"20260715"(8位)，统一成完整8位日期，
+    # 跟create_new_version()里full_date的算法保持一致，否则生成的ID格式对不上现有约定
+    full_date = f"2026{date_short}" if len(date_short) == 4 else date_short
+
+    if tname == "events":
+        for idx in new_df[blank_mask].index:
+            sector = new_df.at[idx, "一级赛道"] if "一级赛道" in new_df.columns else None
+            prefix = SECTOR_ID_PREFIX.get(sector, "EVT")
+            year = full_date[:4]
+            pattern = re.compile(rf"^{prefix}-{year}-(\d+)$")
+            max_num = max([int(m.group(1)) for eid in existing_ids
+                           if (m := pattern.match(eid))], default=0)
+            new_id = f"{prefix}-{year}-{str(max_num + 1).zfill(3)}"
+            new_df.at[idx, id_col] = new_id
+            existing_ids.add(new_id)
+    else:
+        prefix_map = {"mapping": "MAP", "forward": "FWD", "sources": "SRC", "signals_early": "SIG"}
+        pfx = prefix_map.get(tname, tname.upper())
+        pattern = re.compile(rf"^{pfx}-{full_date}-(\d+)$")
+        for idx in new_df[blank_mask].index:
+            max_num = max([int(m.group(1)) for eid in existing_ids
+                           if (m := pattern.match(eid))], default=0)
+            new_id = f"{pfx}-{full_date}-{str(max_num + 1).zfill(3)}"
+            new_df.at[idx, id_col] = new_id
+            existing_ids.add(new_id)
+
+    filled = blank_mask.sum()
+    print(f"  [自动补ID] {tname}: {filled}行漏填{id_col}，已自动生成")
+    return new_df
+
+
 def cmd_apply(source, date_short, label, changes_path):
     with open(changes_path, encoding="utf-8") as f:
         changes = json.load(f)
@@ -295,6 +350,7 @@ def cmd_apply(source, date_short, label, changes_path):
             if col not in new_df.columns:
                 new_df[col] = ""
         new_df = new_df[[c for c in tdef["cols"] if c in new_df.columns]]
+        new_df = _autofill_ids(tname, tdef, df, new_df, date_short)
 
         df = pd.concat([df, new_df], ignore_index=True)
         df.to_csv(fpath, index=False, encoding="utf-8-sig")
@@ -340,6 +396,27 @@ def cmd_apply(source, date_short, label, changes_path):
               f"{len(pool_summary['skipped_no_code'])}家无A股代码跳过"
               f"{'(' + '、'.join(pool_summary['skipped_no_code'][:5]) + ')' if pool_summary['skipped_no_code'] else ''}")
 
+    # sectors_status同步：2026-07-22新增，替代此前"改事件地图时记得手动同步
+    # sectors_status.csv"这一步——那一步从2026-06-18写进设计文档起就只是prompt
+    # 提醒，从未真正代码强制过，导致76个赛道里62个的signal_stock_code/
+    # event_map_status从建档起就没更新过。sectors_status目前只有tech source。
+    if source == "tech":
+        sectors_summary = sync_sectors_status(
+            mapping_rows=additions.get("mapping"),
+            events_rows=additions.get("events"),
+            date_short=date_short,
+            new_dir=new_dir,
+        )
+        if sectors_summary["updated_sectors"]:
+            print(f"\nsectors_status同步: {len(sectors_summary['updated_sectors'])}个赛道"
+                  f"自动补充signal_stock_code/event_map_status "
+                  f"({'、'.join(sectors_summary['updated_sectors'])})")
+        if sectors_summary["flagged_for_review"]:
+            print(f"  stage/wave/priority为判断字段，不自动改，以下赛道有新催化命中，建议人工复核：")
+            for f in sectors_summary["flagged_for_review"]:
+                print(f"    {f['sector_id']}（{f['sub_sector']}）当前stage={f['current_stage']}"
+                      f" 匹配公司:{f['matched_companies']}")
+
     return new_dir, summary
 
 
@@ -371,20 +448,37 @@ def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
     new_rows = []
     skipped = []
     already = 0
+    existing_updated = False
     batch_label = date_short or datetime.now().strftime("%m%d")
 
     for row in mapping_rows:
-        rep = str(row.get("代表公司/公司类型", "") or "")
+        # tech的mapping表列名是"代表公司/公司类型"，nonfin是"代表公司类型"(无斜杠)。
+        # 之前硬编码只读tech那个名字，nonfin的mapping新增行代表公司字段永远读成空，
+        # sync_company_pool对nonfin一直是静默失效的——不报错，就是不加，很难发现。
+        rep = str(row.get("代表公司/公司类型") or row.get("代表公司类型") or "")
         if not rep or rep == "nan":
             continue
+        event_id = str(row.get("事件ID", "") or "")
         for name in re.split(r'[、，,;；/]', rep):
             name = name.strip()
             if not name or len(name) < 2:
                 continue
             if name in existing_names:
                 already += 1
+                # 公司已在池子里，不代表这次的新事件关联不用记：只补充没出现过的事件ID，
+                # 不覆盖已有内容（同一模式见sync_sectors_status的signal_stock_code并集追加）。
+                if event_id and event_id != "nan":
+                    idx = existing.index[existing["公司名称"].astype(str) == name]
+                    for i in idx:
+                        cur = str(existing.at[i, "关联事件ID"]) if pd.notna(existing.at[i, "关联事件ID"]) else ""
+                        linked_ids = set(re.findall(r'[A-Z][A-Z0-9]+-\d{4}-\d{3}', cur))
+                        if event_id not in linked_ids:
+                            existing.at[i, "关联事件ID"] = f"{cur},{event_id}" if cur and cur != "nan" else event_id
+                            existing_updated = True
                 continue
             code = code_dict.get(name)
+            if code and code.startswith(BJ_CODE_PREFIXES):
+                code = None  # 北交所不参与，不纳入公司池
             if not code:
                 skipped.append(name)
                 continue
@@ -404,13 +498,123 @@ def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
             })
             existing_names.add(name)  # 防止本批次内重复添加
 
-    if new_rows:
-        combined = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True)
+    if new_rows or existing_updated:
+        combined = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else existing
         with pd.ExcelWriter(COMPANY_POOL, engine="openpyxl", mode="a",
                             if_sheet_exists="replace") as writer:
             combined.to_excel(writer, sheet_name=sheet_name, index=False)
 
     return {"added": len(new_rows), "already_exists": already, "skipped_no_code": skipped}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PART 3c: sectors_status.csv同步（2026-07-22新增）
+# ═══════════════════════════════════════════════════════════════════════
+
+def sync_sectors_status(mapping_rows=None, events_rows=None, date_short=None, new_dir=None):
+    """把本次apply新增的mapping/events行，通过关键词对照表(config/sectors_status_crosswalk.csv)
+    匹配到sectors_status.csv对应的sector_id，自动补充signal_stock_code(与已有内容合并，不覆盖)
+    和event_map_status(记录最新关联事件ID)。
+
+    stage/wave_number/wave_position/priority这几个字段是产业阶段判断，机器不下这个判断，
+    永远不自动写——命中匹配时只打印提醒清单，人工决定要不要改。
+
+    Why: sectors_status.csv 2026-06-18建档时设计成"用户更新事件地图时，同步更新对应赛道
+    的stage和event_map_status"，但这一步从来只是文档里的一句话，从未写进代码强制执行，
+    76个赛道里62个signal_stock_code/event_map_status从建档起就没再更新过——跟公司池
+    在2026-07-10前的问题是同一类("新逻辑接上、旧流程没有代码强制")。这次直接把"能自动
+    判断的部分"(公司代码关联)代码化，"需要人工判断的部分"(阶段/优先级)保留人工，但通过
+    打印提醒让它不再"悄悄过期"。
+
+    只对tech source生效——sectors_status目前是tech专属表，nonfin没有对应表。
+    """
+    empty = {"updated_sectors": [], "flagged_for_review": []}
+    if not mapping_rows and not events_rows:
+        return empty
+    if not os.path.exists(SECTORS_STATUS_CROSSWALK_CSV) or new_dir is None:
+        return empty
+
+    cross = pd.read_csv(SECTORS_STATUS_CROSSWALK_CSV)
+    cross_map = {r["sector_id"]: str(r["keywords"]).split("|") for _, r in cross.iterrows()}
+
+    df, fpath = load_csv(new_dir, "sectors_status")
+    if df is None:
+        return empty
+
+    code_dict = {}
+    if os.path.exists(CODE_MAP_CSV):
+        code_map_df = pd.read_csv(CODE_MAP_CSV)
+        code_dict = dict(zip(code_map_df["name"], code_map_df["code"].astype(str).str.zfill(6)))
+
+    def searchable_text(row, cols):
+        return " ".join(str(row.get(c, "") or "") for c in cols)
+
+    sector_matches = {}  # sector_id -> {"companies": set(), "event_ids": set()}
+
+    for row in (mapping_rows or []):
+        text = searchable_text(row, ["一级赛道", "二级环节", "三级零部件/材料/设备"])
+        rep = str(row.get("代表公司/公司类型") or "")
+        event_id = str(row.get("事件ID", "") or "")
+        for sid, kws in cross_map.items():
+            if any(kw and kw in text for kw in kws):
+                m = sector_matches.setdefault(sid, {"companies": set(), "event_ids": set()})
+                if event_id and event_id != "nan":
+                    m["event_ids"].add(event_id)
+                for name in re.split(r'[、，,;；/]', rep):
+                    name = name.strip()
+                    if len(name) >= 2:
+                        m["companies"].add(name)
+
+    for row in (events_rows or []):
+        text = searchable_text(row, ["一级赛道", "二级事件", "事件名称"])
+        event_id = str(row.get("事件ID", "") or "")
+        for sid, kws in cross_map.items():
+            if any(kw and kw in text for kw in kws):
+                m = sector_matches.setdefault(sid, {"companies": set(), "event_ids": set()})
+                if event_id and event_id != "nan":
+                    m["event_ids"].add(event_id)
+
+    updated = []
+    flagged = []
+    full_date = f"2026{date_short}" if date_short and len(date_short) == 4 else date_short
+    last_updated_val = f"{full_date[:4]}-{full_date[4:6]}-{full_date[6:]}" if full_date and len(full_date) == 8 \
+        else datetime.now().strftime("%Y-%m-%d")
+
+    for sid, m in sector_matches.items():
+        mask = df["sector_id"] == sid
+        if mask.sum() == 0:
+            continue
+        idx = df.index[mask][0]
+        changed = False
+
+        existing_val = df.at[idx, "signal_stock_code"]
+        existing_codes = str(existing_val) if pd.notna(existing_val) else ""
+        existing_set = {c.strip() for c in existing_codes.split(";") if c.strip() and c.strip() != "nan"}
+        new_codes = {code_dict[name] for name in m["companies"] if name in code_dict}
+        merged = existing_set | new_codes
+        if merged and merged != existing_set:
+            df.at[idx, "signal_stock_code"] = ";".join(sorted(merged))
+            changed = True
+
+        if m["event_ids"]:
+            df.at[idx, "event_map_status"] = f"已关联:{','.join(sorted(m['event_ids']))}"
+            changed = True
+
+        if changed:
+            df.at[idx, "last_updated"] = last_updated_val
+            updated.append(sid)
+
+        flagged.append({
+            "sector_id": sid,
+            "sub_sector": df.at[idx, "sub_sector"] if "sub_sector" in df.columns else "",
+            "current_stage": df.at[idx, "stage"] if "stage" in df.columns else "",
+            "matched_companies": sorted(m["companies"]),
+        })
+
+    if updated:
+        df.to_csv(fpath, index=False, encoding="utf-8-sig")
+
+    return {"updated_sectors": updated, "flagged_for_review": flagged}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -505,7 +709,6 @@ def cmd_validate(source="tech", strict_refs=False):
             if eid_col not in df.columns:
                 continue
             for _, row in df.iterrows():
-                # 历史数据同时使用分号和逗号表达复合引用。
                 ref_ids = re.split(r"[;,，；]", str(row[eid_col]))
                 for rid in ref_ids:
                     rid = rid.strip()
@@ -655,7 +858,7 @@ def cmd_export_excel(source="tech", csv_dir=None, output_path=None):
 def cmd_migrate(output_dir=None):
     date = datetime.now().strftime("%Y%m%d")
     if output_dir is None:
-        output_dir = os.path.join(WORKSPACE_ROOT, f"迁移包_{date}")
+        output_dir = os.path.join(DATA_ROOT, f"迁移包_{date}")
 
     # 每次全新生成，不在旧目录上叠加——否则历史版本的目录结构/已删除脚本的残留
     # 会一直躺在里面（曾发现05_技能代码/top-picks_references是06-30遗留，早已过期）。
@@ -722,12 +925,13 @@ def cmd_migrate(output_dir=None):
         os.path.join(SKILL_DIR, "scripts", "event_map_updater.py"),
         os.path.join(SKILL_DIR, "SKILL.md"),
         QUERY_SCRIPT,
+        SECTORS_STATUS_CROSSWALK_CSV,
     ):
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(output_dir, "07_技能代码"))
 
     # 08: 框架版本快照
-    fw_versions_dir = os.path.join(WORKSPACE_ROOT, "framework_versions")
+    fw_versions_dir = os.path.join(DATA_ROOT, "framework_versions")
     if os.path.isdir(fw_versions_dir):
         dst_fw = os.path.join(output_dir, "08_框架版本快照")
         for vdir in sorted(os.listdir(fw_versions_dir)):
@@ -742,9 +946,18 @@ def cmd_migrate(output_dir=None):
         os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts", "catalyst_window_model.py"),
         os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts", "framework_snapshot.py"),
         os.path.join(REPO_ROOT, "skills", "top-picks", "references", "catalyst_left_side_scanner.py"),
+        os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts", "market_state_fetcher.py"),
+        os.path.join(REPO_ROOT, "skills", "stock-analysis", "references", "market-state-machine.md"),
     ):
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(output_dir, "07_技能代码"))
+
+    # market-outlook/SKILL.md：basename是通用的"SKILL.md"，会跟上面update-event-map
+    # 自己的SKILL.md撞名互相覆盖，必须显式改名复制（同update-market-thesis skill.md
+    # 已经在用的命名方式：{技能名}_SKILL.md）
+    mo_skill = os.path.join(REPO_ROOT, "skills", "market-outlook", "SKILL.md")
+    if os.path.exists(mo_skill):
+        shutil.copy2(mo_skill, os.path.join(output_dir, "07_技能代码", "market-outlook_SKILL.md"))
 
     # 01: README
     readme_content = f"""# 产业事件地图迁移包
@@ -752,14 +965,18 @@ def cmd_migrate(output_dir=None):
 
 ## 恢复步骤
 
-1. 将本迁移包放入 $TZ_CODEX_HOME/迁移归档/
-2. 解压 02_科技主线数据库/CSV包_{date}.zip 到 $TZ_CODEX_HOME/技能数据/科技产业事件/csv{date[-4:]}/
-3. 解压 03_非科技主线数据库/CSV包_{date}.zip 到 $TZ_CODEX_HOME/技能数据/非科技产业事件地图/
-4. 将 04_代表公司分类池/ 下的文件复制到 $TZ_CODEX_HOME/技能数据/
-5. 将 07_技能代码/中的脚本恢复到 $TZ_CODEX_HOME/repo/skills/ 对应目录
-6. 将 08_框架版本快照/ 复制到 $TZ_CODEX_HOME/framework_versions/
-7. 将 05_历史材料/ 中的 memory/*.md 复制到 $TZ_CODEX_HOME/repo/memory/
-8. 运行 event_map_updater.py status 验证数据完整性
+1. 将本迁移包放入 ~/Desktop/tz/技能数据/
+2. 解压 02_科技主线数据库/CSV包_{date}.zip 到 ~/Desktop/tz/技能数据/科技产业事件/csv{date[-4:]}/
+3. 解压 03_非科技主线数据库/CSV包_{date}.zip 到 ~/Desktop/tz/技能数据/非科技产业事件地图/非科技主线产业事件地图_CSV包_{date}/
+4. 将 04_代表公司分类池/ 下的文件复制到 ~/Desktop/tz/技能数据/
+5. 将 07_技能代码/event_map_updater.py 放入 ~/.claude/skills/update-event-map/scripts/
+6. 将 07_技能代码/SKILL.md 放入 ~/.claude/skills/update-event-map/
+7. 将 07_技能代码/event_map_query.py 和 catalyst_window_model.py 放入 ~/.claude/skills/stock-analysis/scripts/
+8. 将 07_技能代码/analysis-prompt-template.md 放入 ~/.claude/skills/stock-analysis/references/
+9. 将 07_技能代码/catalyst_left_side_scanner.py 放入 ~/.claude/skills/top-picks/references/
+10. 将 07_技能代码/framework_snapshot.py 放入 ~/.claude/skills/stock-analysis/scripts/
+11. 将 08_框架版本快照/ 复制到 ~/Desktop/tz/技能数据/framework_versions/
+12. 将 05_历史材料/ 中的memory/*.md 复制到 ~/.claude/projects/对应目录/memory/
 
 ## 数据概况
 
@@ -817,14 +1034,14 @@ def main():
     p_excel.add_argument("--output", help="输出路径（默认自动生成）")
 
     p_migrate = sub.add_parser("migrate", help="生成迁移包（科技+非科技+公司池）")
-    p_migrate.add_argument("--output", help="输出目录（默认$TZ_CODEX_HOME/迁移包_日期）")
+    p_migrate.add_argument("--output", help="输出目录（默认~/Desktop/tz/技能数据/迁移包_日期）")
 
     p_validate = sub.add_parser("validate", help="跨表一致性检查")
     p_validate.add_argument("--source", choices=["tech", "nonfin"], default="tech")
     p_validate.add_argument(
         "--strict-refs",
         action="store_true",
-        help="额外列出尚未进入events主表的候选/外部事件引用",
+        help="额外报告未进入events主表的候选/外部引用（仅提示，不计结构错误）",
     )
 
     p_sync = sub.add_parser("sync-pool", help="手动重跑公司池同步（正常由apply自动触发，仅用于补录/调试）")

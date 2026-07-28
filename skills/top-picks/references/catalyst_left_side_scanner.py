@@ -74,16 +74,37 @@ _SW_SECTORS = {
     "801960.SI": ("石油石化", "non_tech"),
     "801170.SI": ("交通运输", "non_tech"),
     "801180.SI": ("房地产",   "non_tech"),
+    # 2026-07-22补齐至申万31个一级行业全覆盖（此前22个，缺9个）
+    "801110.SI": ("家用电器", "non_tech"),
+    "801130.SI": ("纺织服饰", "non_tech"),
+    "801140.SI": ("轻工制造", "non_tech"),
+    "801200.SI": ("商贸零售", "non_tech"),
+    "801230.SI": ("综合",     "non_tech"),
+    "801710.SI": ("建筑材料", "non_tech"),
+    "801720.SI": ("建筑装饰", "non_tech"),
+    "801970.SI": ("环保",     "non_tech"),
+    "801980.SI": ("美容护理", "non_tech"),
 }
 
 def rotation_check(pro) -> None:
-    """申万行业20日/5日涨幅排行，嵌入 top-picks Step 0，自动运行。"""
+    """申万行业20日/5日涨幅排行，嵌入 top-picks Step 0，自动运行。
+
+    2026-07-22教训：`pro.sw_daily()`比`pro.index_daily()`慢至少1个交易日发布——
+    同一个申万指数代码(如801050.SI有色金属)，`index_daily()`当天下午就有当日
+    收盘数据，`sw_daily()`还停在前一交易日。实测当天用sw_daily复盘，把7/21的
+    行业涨跌幅当成7/22的板块表现，把当天实际大涨的有色/贵金属说成还在跌。
+    根因是sw_daily接口本身发布节奏慢，不是数据真的抓不到——换成index_daily
+    （同样的申万指数代码，两个接口都支持）就能拿到当天数据，问题在换接口，
+    不在数据源本身。仍保留新鲜度校验作为兜底：万一index_daily某天也滞后，
+    照样会在标题里报警，不会静默拿旧数据当新数据用。
+    """
     end   = datetime.now()
     start = end - timedelta(days=40)
     results = []
+    data_max_date = None
     for ts_code, (name, kind) in _SW_SECTORS.items():
         try:
-            df = pro.sw_daily(
+            df = pro.index_daily(
                 ts_code=ts_code,
                 start_date=start.strftime("%Y%m%d"),
                 end_date=end.strftime("%Y%m%d"),
@@ -92,6 +113,9 @@ def rotation_check(pro) -> None:
                 continue
             df = df.sort_values("trade_date")
             closes = df["close"].tolist()
+            latest_date = df["trade_date"].iloc[-1]
+            if data_max_date is None or latest_date > data_max_date:
+                data_max_date = latest_date
             p20 = round((closes[-1] / closes[-20] - 1) * 100, 1) if len(closes) >= 20 else None
             p5  = round((closes[-1] / closes[-5]  - 1) * 100, 1) if len(closes) >= 5  else None
             results.append({"name": name, "kind": kind, "p20": p20, "p5": p5})
@@ -100,6 +124,17 @@ def rotation_check(pro) -> None:
 
     if not results:
         return
+
+    expected_latest = None
+    try:
+        cal = pro.trade_cal(exchange="SSE",
+                             start_date=(end - timedelta(days=10)).strftime("%Y%m%d"),
+                             end_date=end.strftime("%Y%m%d"))
+        open_days = sorted(cal[cal["is_open"] == 1]["cal_date"].tolist(), reverse=True)
+        if open_days:
+            expected_latest = open_days[0]
+    except Exception:
+        pass
 
     results.sort(key=lambda x: x["p20"] if x["p20"] is not None else -99, reverse=True)
 
@@ -112,7 +147,11 @@ def rotation_check(pro) -> None:
     ]
 
     print(f"\n{'─'*54}")
-    print("  板块轮动雷达（申万行业 20日/5日涨幅）")
+    print(f"  板块轮动雷达（申万行业 20日/5日涨幅，数据截至{data_max_date}）")
+    if expected_latest and data_max_date and data_max_date < expected_latest:
+        print(f"  ⚠️ sw_daily数据滞后：最新交易日应为{expected_latest}，"
+              f"接口只更新到{data_max_date}——以下涨跌幅不代表最近一个交易日的"
+              f"真实表现，个股级别的今日异动请用pro.daily()直接核实，不要只看本雷达")
     print(f"{'─'*54}")
     for r in results:
         tag   = "🔵" if r["kind"] == "tech" else ("⚡" if r in anomalies else "  ")
@@ -133,10 +172,6 @@ def _get_pro():
             if "TUSHARE_TOKEN" in line:
                 token = line.split("=", 1)[-1].strip()
     if not token:
-        tp = os.path.expanduser("~/.tushare_token")
-        if os.path.exists(tp):
-            token = open(tp).read().strip()
-    if not token:
         raise RuntimeError("TUSHARE_TOKEN 未配置；请写入 repo/.env 或环境变量")
     import tushare as ts
     return ts.pro_api(token)
@@ -145,8 +180,8 @@ def _get_pro():
 # 不再自己解析events.csv的"重要程度/当前状态"字段打分——那套静态标签不衰减，
 # 会让过期几个月的催化一直显示"活跃"。新鲜度/是否还能操作全部交给window模型判断。
 
-EVENT_MAP_QUERY_SCRIPT = os.path.join(
-    REPO_ROOT, "skills", "stock-analysis", "scripts", "event_map_query.py"
+EVENT_MAP_QUERY_SCRIPT = os.path.expanduser(
+    os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts", "event_map_query.py")
 )
 
 # bucket → 权重：🔴🟡按窗口模型原分值计（催化最紧迫），🟢按趋势配置期打6折，
@@ -178,24 +213,31 @@ def load_active_events() -> pd.DataFrame:
 
     重要程度已经在window模型的score_event()里折算进final_score，
     这里不再单独按★数过滤。
-    """
-    window_scores = load_window_scores()
 
+    2026-07-16修复：此前只查tech源，nonfin源(创新药/有色/储能等)从未被扫描过，
+    导致window模型评分很高(甚至🔴红桶)的nonfin事件永远进不了候选池——不是催化
+    不够格，是代码没查那个库。现在tech+nonfin都查，用source字段区分。
+    """
     rows = []
-    for eid, e in window_scores.items():
-        weight = BUCKET_WEIGHT.get(e["bucket"], 0.0)
-        if weight <= 0:
-            continue
-        rows.append({
-            "事件ID":      eid,
-            "事件名称":     e["event_name"],
-            "当前状态":     e["action"],          # 用window模型的操作建议取代原始状态文本
-            "bucket":      e["bucket"],
-            "catalyst_score": round(e["final_score"] * weight, 1),
-        })
+    for source in ("tech", "nonfin"):
+        window_scores = load_window_scores(source=source)
+        for eid, e in window_scores.items():
+            weight = BUCKET_WEIGHT.get(e["bucket"], 0.0)
+            if weight <= 0:
+                continue
+            rows.append({
+                "事件ID":      eid,
+                "事件名称":     e["event_name"],
+                "当前状态":     e["action"],          # 用window模型的操作建议取代原始状态文本
+                "bucket":      e["bucket"],
+                "catalyst_score": round(e["final_score"] * weight, 1),
+                "source":      source,
+            })
 
     df = pd.DataFrame(rows)
-    log.info(f"窗口模型活跃事件(已排除⚪不操作/已退出): {len(df)} 个")
+    log.info(f"窗口模型活跃事件(已排除⚪不操作/已退出): {len(df)} 个 "
+             f"(tech={sum(1 for r in rows if r['source']=='tech')}, "
+             f"nonfin={sum(1 for r in rows if r['source']=='nonfin')})")
     return df
 
 # ── Step 2: 公司映射 ──────────────────────────────────────────────────────────
@@ -212,9 +254,17 @@ def load_company_candidates(active_events: pd.DataFrame) -> pd.DataFrame:
     event_status_map= dict(zip(active_events["事件ID"], active_events["当前状态"].astype(str)))
     event_bucket_map= dict(zip(active_events["事件ID"], active_events["bucket"].astype(str)))
 
-    pool = pd.read_excel(COMPANY_POOL, sheet_name="科技公司池")
+    # 2026-07-16修复：此前只读科技公司池，非科技公司池(创新药/有色/储能等对应的
+    # 公司)从未被纳入候选——即使active_events里已经有nonfin事件，也找不到公司。
+    pool_sheets = []
+    for sheet in ("科技公司池", "非科技公司池"):
+        try:
+            pool_sheets.append(pd.read_excel(COMPANY_POOL, sheet_name=sheet))
+        except Exception as e:
+            log.warning(f"  读取{sheet}失败: {e}")
+    pool = pd.concat(pool_sheets, ignore_index=True) if pool_sheets else pd.DataFrame()
     a_pool = pool[pool["市场/属性"].astype(str).str.contains("A股", na=False)].copy()
-    
+
     code_map = pd.read_csv(CODE_MAP_CSV)
     code_dict = dict(zip(code_map["name"], code_map["code"].astype(str).str.zfill(6)))
     
@@ -430,6 +480,57 @@ def score_candidates(candidates: pd.DataFrame, price_map: dict) -> pd.DataFrame:
         result = result.sort_values("final_score", ascending=False)
     return result
 
+# ── Step 4b: 前瞻记录（2026-07-16新增）────────────────────────────────────────
+PROSPECTIVE_LOG = os.path.join(DATA_ROOT, "market_daily_snapshot", "toppicks_log.csv")
+_LOG_FIELDS = ["scan_date", "trade_date", "code", "name", "sector", "event_id",
+               "event_bucket", "catalyst_score", "lr_score", "lr_label",
+               "close", "ma60", "dist_60d_high", "pct_30d", "final_score"]
+
+def log_prospective(results: pd.DataFrame, trade_date: str):
+    """把本次扫描的全部候选（不只是展示的top N）追加进持久化CSV，供以后回头验证
+    "标就绪/预热的票后续实际表现如何"——不是回测，是前瞻记录，今天写不出结论，
+    攒够时间后才有用。按(trade_date, code)去重，同一天重复跑不会重复写。
+    """
+    import csv
+    if results.empty:
+        return
+    os.makedirs(os.path.dirname(PROSPECTIVE_LOG), exist_ok=True)
+    scan_date = datetime.now().strftime("%Y%m%d")
+
+    existing_keys = set()
+    if os.path.exists(PROSPECTIVE_LOG):
+        with open(PROSPECTIVE_LOG, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                existing_keys.add((r.get("trade_date"), r.get("code")))
+
+    new_rows = []
+    for _, row in results.iterrows():
+        key = (trade_date, row["code"])
+        if key in existing_keys:
+            continue
+        new_rows.append({
+            "scan_date": scan_date, "trade_date": trade_date,
+            "code": row["code"], "name": row["name"], "sector": row.get("sector", ""),
+            "event_id": row["event_id"], "event_bucket": row.get("event_bucket", ""),
+            "catalyst_score": row["catalyst_score"], "lr_score": row["lr_score"],
+            "lr_label": row["lr_label"], "close": row["close"], "ma60": row["ma60"],
+            "dist_60d_high": row["dist_60d_high"], "pct_30d": row["pct_30d"],
+            "final_score": round(row["final_score"], 1),
+        })
+        existing_keys.add(key)
+
+    if not new_rows:
+        log.info("[前瞻记录] 无新增（今天已经记过）")
+        return
+    exists = os.path.exists(PROSPECTIVE_LOG)
+    with open(PROSPECTIVE_LOG, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=_LOG_FIELDS)
+        if not exists:
+            writer.writeheader()
+        writer.writerows(new_rows)
+    log.info(f"[前瞻记录] 已追加{len(new_rows)}条到 {PROSPECTIVE_LOG}")
+
+
 # ── Step 5: 输出 ──────────────────────────────────────────────────────────────
 READINESS_ICON = {"就绪": "🟢", "预热": "🟡", "观望": "⚪"}
 
@@ -471,16 +572,25 @@ def print_results(df: pd.DataFrame, top_n: int = 20):
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def resolve_trade_date(pro) -> str:
+    """最近一个已收盘交易日：不用"hour<15"猜测收盘时间——沙盒系统时钟不一定
+    等于北京时间，2026-07-22实测sandbox显示14:43时该猜测已经把已收盘的当天
+    数据误判成"未收盘"，导致扫描器拿前一交易日的候选跑了一整天。改为直接探测
+    当天数据是否已发布，发布了就用，没发布再退回前一交易日（同
+    stock_data_fetcher.py的fetch_market_breadth()已用过的修复方式）。
+    """
     now = datetime.now()
     today = now.strftime("%Y%m%d")
     try:
         start = (now - timedelta(days=10)).strftime("%Y%m%d")
         cal = pro.trade_cal(exchange="SSE", start_date=start, end_date=today)
         days = sorted(cal[cal["is_open"] == 1]["cal_date"].tolist(), reverse=True)
-        if days:
-            if days[0] == today and now.hour < 15:
-                return days[1] if len(days) > 1 else days[0]
-            return days[0]
+        if not days:
+            return today
+        candidate = days[0]
+        probe = pro.daily(trade_date=candidate, fields="ts_code")
+        if probe is None or probe.empty:
+            return days[1] if len(days) > 1 else candidate
+        return candidate
     except Exception:
         pass
     return today
@@ -518,6 +628,9 @@ def main():
     # Step 4: 评分过滤
     results = score_candidates(candidates, price_map)
     log.info(f"通过价格筛选: {len(results)} 家")
+
+    # Step 4b: 前瞻记录（全部通过价格筛选的候选都记，不只是展示的top N）
+    log_prospective(results, trade_date)
 
     # Step 5: 输出
     if args.json:

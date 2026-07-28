@@ -115,7 +115,7 @@ def to_yfinance_code(code: str, market: str) -> str:
     if market == "us":
         return code
     # A股
-    if code.startswith(("600", "601", "603", "688")):
+    if code.startswith(("600", "601", "603", "605", "688")):
         return f"{code}.SS"
     if code.startswith(("51", "52", "56", "58")):
         return f"{code}.SS"
@@ -157,7 +157,7 @@ def _fetch_tushare_a(code: str, days: int):
         raise EnvironmentError("TUSHARE_TOKEN not set")
     import tushare as ts
     pro = ts.pro_api(token)
-    ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+    ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
     df = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
@@ -757,7 +757,7 @@ def _fetch_tushare_moneyflow_df(code: str, days: int = 30):
     try:
         import tushare as ts
         pro = ts.pro_api(token)
-        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y%m%d")
         end = datetime.now().strftime("%Y%m%d")
         df = pro.moneyflow(ts_code=ts_code, start_date=start, end_date=end)
@@ -824,7 +824,7 @@ def fetch_stock_fund_flow(code: str) -> dict:
         return {}
     try:
         import akshare as ak
-        market = "sh" if code.startswith(("600", "601", "603", "688", "51", "58")) else "sz"
+        market = "sh" if code.startswith(("600", "601", "603", "605", "688", "51", "58")) else "sz"
         df = ak.stock_individual_fund_flow(stock=code, market=market)
         if df is None or df.empty:
             raise ValueError(f"No fund flow data for {code}")
@@ -956,7 +956,7 @@ def fetch_fund_flow_multiday(code: str) -> dict:
         return {}
     try:
         import akshare as ak
-        market = "sh" if code.startswith(("600", "601", "603", "688", "51", "58")) else "sz"
+        market = "sh" if code.startswith(("600", "601", "603", "605", "688", "51", "58")) else "sz"
         df = None
         # Try multiple interface signatures (akshare renames across versions)
         for try_fn in [
@@ -1026,7 +1026,7 @@ def fetch_tushare_chip_dist(code: str) -> dict:
     try:
         import tushare as ts
         pro = ts.pro_api(token)
-        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         start = (datetime.now() - timedelta(days=16)).strftime("%Y%m%d")
         end = datetime.now().strftime("%Y%m%d")
         df = pro.cyq_perf(ts_code=ts_code, start_date=start, end_date=end)
@@ -1098,7 +1098,7 @@ def fetch_stock_sector(code: str) -> str:
         try:
             import tushare as ts
             pro = ts.pro_api(token)
-            ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+            ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
             df = pro.stock_basic(ts_code=ts_code, fields="ts_code,name,industry")
             if df is not None and not df.empty:
                 val = str(df.iloc[0].get("industry", ""))
@@ -1233,7 +1233,7 @@ def _fetch_etf_share_change(etf_codes: list) -> dict:
         end = datetime.now().strftime("%Y%m%d")
         share_chg_pct_list = []
         for code in etf_codes:
-            ts_code = f"{code}.SH" if code.startswith(("51", "56", "58")) else f"{code}.SZ"
+            ts_code = f"{code}.SH" if code.startswith(("51", "52", "56", "58")) else f"{code}.SZ"
             df = pro.fund_share(ts_code=ts_code, start_date=start, end_date=end)
             if df is None or df.empty or "fd_share" not in df.columns:
                 continue
@@ -1420,7 +1420,7 @@ def fetch_tushare_fundamentals(code: str) -> dict:
     try:
         import tushare as ts
         pro = ts.pro_api(token)
-        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         result = {"source": "tushare", "ts_code": ts_code}
 
         end_date = datetime.now().strftime("%Y%m%d")
@@ -1522,7 +1522,7 @@ def fetch_pledge_ratio(code: str) -> dict:
     try:
         import tushare as ts
         pro = ts.pro_api(token)
-        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         df = pro.pledge_stat(ts_code=ts_code)
         if df is None or df.empty:
             return {"pledge_ratio": None, "source": "no_data"}
@@ -1572,7 +1572,7 @@ def fetch_financial_penetration(code: str) -> dict:
     try:
         import tushare as ts
         pro = ts.pro_api(token)
-        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "688")) else f"{code}.SZ"
+        ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         end_date = datetime.now().strftime("%Y%m%d")
         start_2y = (datetime.now() - timedelta(days=800)).strftime("%Y%m%d")
         result = {"source": "tushare"}

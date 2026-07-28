@@ -1,5 +1,13 @@
 # Memory Index
 
+- [P0执行记录2026-07-24](project-p0-execution-20260724.md) — 排除北交所、补齐mapping，并修复既有公司不追加事件ID的结构性问题
+- [质量复利筛选技能2026-07-21](project-quality-compounder-skill-20260721.md) — 沪深300十年质量价值筛选器的设计、口径与已完成验证
+- [Tushare管线扩充2026-07-17](project-tushare-pipeline-expansion-20260717.md) — 两融、资金流、技术因子、机构占比及业绩质量字段扩充
+- [情景概率回测待办](project-scenario-probability-backtest.md) — market-outlook人工情景概率的多因子回测设计任务
+- [tz目录结构参考](reference_tz_folder_structure.md) — 2026-07-21整理后的原始tz目录分层和数据位置
+- [市场状态与第四层对齐](project-layer4-market-state-alignment.md) — 市场状态机与个股分析第四层口径对齐
+- [市场展望覆盖记录](project-market-outlook-coverage-20260722.md) — market-outlook数据覆盖与缺口记录
+- [市场状态统一复核](project-market-status-unification-20260712.md) — 多处市场状态定义的统一审查
 - [本地离线迁移包机制2026-07-28](project-local-backup-20260728.md) — Git bundle+活动数据+SHA-256自动复验；明确排除.env和Git凭据
 - [market-outlook迁移与数据口径修正2026-07-28](project-market-outlook-migration-20260728.md) — 从迁移包恢复大盘状态机；修正两融汇总、资金流代理和单位换算；待真实Tushare在线验收
 - [股票技能体系项目](stock-skills-project.md) — 两个技能的框架设计、关键规则决策和数据源现状，用于跨会话延续开发
