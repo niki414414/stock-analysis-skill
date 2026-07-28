@@ -2658,5 +2658,142 @@ def main():
     print(json.dumps(output, ensure_ascii=False, indent=2))
 
 
+# ── 以下两个函数供 market_state_fetcher.py 调用 ──────────────────────────
+
+def fetch_margin_trend(pro=None) -> dict:
+    """拉取沪深两市融资余额趋势（近20个自然日）。
+
+    Tushare ``margin`` 返回交易所汇总数据，余额字段为 ``rzye``（元）。
+    同一交易日可能同时包含上交所和深交所记录，必须按交易日求和后再比较；
+    不能把 ``margin_detail`` 的逐股票记录直接当成时间序列。
+    """
+    try:
+        pro = pro or _get_tushare_pro()
+        df = pro.margin(
+            start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
+            end_date=datetime.now().strftime("%Y%m%d"),
+        )
+        if df is None or df.empty:
+            return {"direction": "unknown", "consecutive_days": 0,
+                    "latest_balance_yi": None, "source": "no_data"}
+        if "trade_date" not in df.columns or "rzye" not in df.columns:
+            return {"direction": "unknown", "consecutive_days": 0,
+                    "latest_balance_yi": None, "source": "missing_fields"}
+        daily = (
+            df.assign(rzye=df["rzye"].astype(float))
+            .groupby("trade_date", as_index=False)["rzye"].sum()
+            .sort_values("trade_date")
+        )
+        balances = daily["rzye"].tolist()
+        if len(balances) < 5:
+            return {"direction": "unknown", "consecutive_days": 0,
+                    "latest_balance_yi": None, "source": "too_few"}
+        # 方向判断：近5日均值 vs 前5日均值
+        recent = sum(balances[-5:]) / 5
+        prev = sum(balances[-10:-5]) / 5 if len(balances) >= 10 else recent
+        if recent > prev * 1.005:
+            direction = "up"
+        elif recent < prev * 0.995:
+            direction = "down"
+        else:
+            direction = "flat"
+        # 连续同向天数
+        consecutive = 0
+        for i in range(len(balances) - 1, 0, -1):
+            if direction == "up" and balances[i] > balances[i-1]:
+                consecutive += 1
+            elif direction == "down" and balances[i] < balances[i-1]:
+                consecutive += 1
+            else:
+                break
+        return {
+            "direction": direction,
+            "consecutive_days": consecutive,
+            "latest_balance_yi": round(balances[-1] / 1e8, 2),
+            "latest_date": str(daily["trade_date"].iloc[-1]),
+            "source": "tushare_margin",
+        }
+    except Exception as e:
+        return {"direction": "unknown", "consecutive_days": 0,
+                "historical_percentile_6y": None, "source": f"error:{e}"}
+
+
+def fetch_market_moneyflow_dc(pro=None) -> dict:
+    """汇总全市场大单/小单资金流代理（最近可用交易日）。
+
+    使用 Tushare ``moneyflow`` 的逐股票L2订单数据。大单+特大单只能作为
+    机构/主力的代理，小单只能作为散户代理，输出中不得把代理写成真实身份。
+    金额字段单位为万元，汇总后除以10000换算为亿元。
+    """
+    try:
+        pro = pro or _get_tushare_pro()
+        end_date = datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
+        df = pro.moneyflow(start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return {"pattern": "unknown", "source": "no_data"}
+        required = {
+            "trade_date", "buy_sm_amount", "sell_sm_amount",
+            "buy_lg_amount", "sell_lg_amount",
+            "buy_elg_amount", "sell_elg_amount", "net_mf_amount",
+        }
+        if not required.issubset(df.columns):
+            return {"pattern": "unknown", "source": "missing_fields"}
+        latest_date = str(df["trade_date"].astype(str).max())
+        latest = df[df["trade_date"].astype(str) == latest_date].copy()
+        for col in required - {"trade_date"}:
+            latest[col] = latest[col].astype(float)
+        large_net_wan = (
+            latest["buy_lg_amount"].sum() + latest["buy_elg_amount"].sum()
+            - latest["sell_lg_amount"].sum() - latest["sell_elg_amount"].sum()
+        )
+        small_net_wan = (
+            latest["buy_sm_amount"].sum() - latest["sell_sm_amount"].sum()
+        )
+        if large_net_wan > 0 and small_net_wan < 0:
+            pattern = "large_order_inflow_small_order_outflow"
+        elif large_net_wan < 0 and small_net_wan > 0:
+            pattern = "large_order_outflow_small_order_inflow"
+        elif large_net_wan > 0 and small_net_wan > 0:
+            pattern = "broad_inflow"
+        elif large_net_wan < 0 and small_net_wan < 0:
+            pattern = "broad_outflow"
+        else:
+            pattern = "mixed_flat"
+        return {
+            "pattern": pattern,
+            "latest_date": latest_date,
+            "large_order_net_yi": round(large_net_wan / 10000, 2),
+            "small_order_net_yi": round(small_net_wan / 10000, 2),
+            "market_net_yi": round(latest["net_mf_amount"].sum() / 10000, 2),
+            "identity_caveat": "大单/特大单与小单仅为订单规模代理，不代表可识别的机构/散户身份",
+            "source": "tushare_moneyflow",
+        }
+    except Exception as e:
+        return {"pattern": "unknown", "source": f"error:{e}"}
+
+
+def _get_tushare_pro():
+    """获取 tushare pro 对象，复用 token 获取逻辑。"""
+    import tushare as ts
+    token = os.environ.get("TUSHARE_TOKEN", "")
+    if not token:
+        workspace_root = os.path.abspath(os.path.expanduser(
+            os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+        ))
+        env_path = os.path.join(workspace_root, "repo", ".env")
+        if os.path.exists(env_path):
+            for line in open(env_path):
+                if "TUSHARE_TOKEN" in line:
+                    token = line.split("=", 1)[-1].strip()
+    if not token:
+        tp = os.path.expanduser("~/.tushare_token")
+        if os.path.exists(tp):
+            token = open(tp).read().strip()
+    if not token:
+        raise RuntimeError("TUSHARE_TOKEN 未配置；请写入 repo/.env 或环境变量")
+    return ts.pro_api(token)
+
+
 if __name__ == "__main__":
     main()

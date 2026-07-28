@@ -1,5 +1,6 @@
 # Memory Index
 
+- [market-outlook迁移与数据口径修正2026-07-28](project-market-outlook-migration-20260728.md) — 从迁移包恢复大盘状态机；修正两融汇总、资金流代理和单位换算；待真实Tushare在线验收
 - [股票技能体系项目](stock-skills-project.md) — 两个技能的框架设计、关键规则决策和数据源现状，用于跨会话延续开发
 - [数据源优先级](feedback_data_source.md) — Tushare主，akshare/东方财富备选；含单位换算和超时处理要求
 - [持仓状态2026-06-25](portfolio-status-20260625.md) — 账户一工业富联400股+36%建议减100；账户二大族+长电+红利ETF+300ETF仓位40%
