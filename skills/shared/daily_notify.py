@@ -30,7 +30,12 @@ import requests
 
 # ── 路径 ───────────────────────────────────────────────────────────────────────
 SKILL_DIR = Path(__file__).parent
-ENV_FILE  = SKILL_DIR / ".env"
+WORKSPACE_ROOT = Path(
+    os.path.abspath(os.path.expanduser(
+        os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+    ))
+)
+ENV_FILE  = WORKSPACE_ROOT / "repo" / ".env"
 LOG_PATH  = SKILL_DIR / "notify.log"
 
 # ── 板块ETF映射（用ETF涨跌代理板块表现，tushare fund_daily 接口，稳定可靠）────────
@@ -167,7 +172,7 @@ def pct_emoji(pct: float) -> str:
 # ── 微信推送（Server酱）──────────────────────────────────────────────────────────
 def send_wechat(title: str, content: str) -> bool:
     if not SERVERCHAN_KEY:
-        print("[ERROR] SERVERCHAN_KEY 未设置，请检查 ~/.claude/skills/.env")
+        print("[ERROR] SERVERCHAN_KEY 未设置，请检查 repo/.env")
         return False
     try:
         resp = requests.post(

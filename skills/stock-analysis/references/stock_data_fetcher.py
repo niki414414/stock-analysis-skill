@@ -32,8 +32,11 @@ warnings.filterwarnings("ignore")
 
 
 def _load_env_file():
-    """Load ~/.claude/skills/.env into os.environ (only sets missing vars)."""
-    env_path = os.path.expanduser("~/.claude/skills/.env")
+    """Load the workspace .env into os.environ (only sets missing vars)."""
+    workspace_root = os.path.abspath(os.path.expanduser(
+        os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+    ))
+    env_path = os.path.join(workspace_root, "repo", ".env")
     if not os.path.exists(env_path):
         return
     with open(env_path) as f:
@@ -2619,7 +2622,7 @@ def main():
     sources_status = {}
     for lib in ["tushare", "efinance", "akshare", "yfinance"]:
         sources_status[lib] = "available" if _check_source(lib) else "not installed"
-    sources_status["tushare_token"] = "configured" if os.environ.get("TUSHARE_TOKEN") else "not set (add to ~/.claude/skills/.env)"
+    sources_status["tushare_token"] = "configured" if os.environ.get("TUSHARE_TOKEN") else "not set (add to repo/.env)"
     sources_status["tavily_api"] = "configured" if os.environ.get("TAVILY_API_KEY") else "not set"
     sources_status["serpapi"] = "configured" if os.environ.get("SERPAPI_KEY") else "not set"
     _log(f"Data sources: {json.dumps(sources_status)}")

@@ -39,9 +39,14 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s", st
 log = logging.getLogger(__name__)
 
 # ── 路径常量 ──────────────────────────────────────────────────────────────────
-COMPANY_POOL  = os.path.expanduser("~/Desktop/tz/公司.xlsx")
-CODE_MAP_CSV  = os.path.expanduser("~/Desktop/tz/company_code_map.csv")
-CSV_BASE_DIR  = os.path.expanduser("~/Desktop/tz/科技产业事件/")
+WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
+    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+))
+REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
+DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
+COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
+CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
+CSV_BASE_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 
 # ── 申万行业轮动雷达 ──────────────────────────────────────────────────────────
 # 使用 SW2021 标准代码（via pro.index_classify(level='L1', src='SW2021')）
@@ -121,8 +126,8 @@ def rotation_check(pro) -> None:
 
 # ── Tushare ───────────────────────────────────────────────────────────────────
 def _get_pro():
-    token = ""
-    env_path = os.path.expanduser("~/.claude/skills/.env")
+    token = os.environ.get("TUSHARE_TOKEN", "")
+    env_path = os.path.join(REPO_ROOT, ".env")
     if os.path.exists(env_path):
         for line in open(env_path):
             if "TUSHARE_TOKEN" in line:
@@ -132,7 +137,7 @@ def _get_pro():
         if os.path.exists(tp):
             token = open(tp).read().strip()
     if not token:
-        token = "ddbf94e5989919da256888c090234afef478330a9f86275d3bd4f1f7"
+        raise RuntimeError("TUSHARE_TOKEN 未配置；请写入 repo/.env 或环境变量")
     import tushare as ts
     return ts.pro_api(token)
 
@@ -140,8 +145,8 @@ def _get_pro():
 # 不再自己解析events.csv的"重要程度/当前状态"字段打分——那套静态标签不衰减，
 # 会让过期几个月的催化一直显示"活跃"。新鲜度/是否还能操作全部交给window模型判断。
 
-EVENT_MAP_QUERY_SCRIPT = os.path.expanduser(
-    "~/.claude/skills/stock-analysis/scripts/event_map_query.py"
+EVENT_MAP_QUERY_SCRIPT = os.path.join(
+    REPO_ROOT, "skills", "stock-analysis", "scripts", "event_map_query.py"
 )
 
 # bucket → 权重：🔴🟡按窗口模型原分值计（催化最紧迫），🟢按趋势配置期打6折，

@@ -12,8 +12,8 @@
 用法：
   python3 event_map_updater.py status
   python3 event_map_updater.py apply --date 0621 --label weekly --changes /tmp/changes.json
-  python3 event_map_updater.py export-excel --output ~/Desktop/tz/科技产业事件/621.xlsx
-  python3 event_map_updater.py migrate --output ~/Desktop/tz/迁移包_20260621
+  python3 event_map_updater.py export-excel --output "$TZ_CODEX_HOME/技能数据/科技产业事件/621.xlsx"
+  python3 event_map_updater.py migrate --output "$TZ_CODEX_HOME/迁移包_20260621"
   python3 event_map_updater.py validate
   python3 event_map_updater.py next-ids --table events --count 3
 """
@@ -30,13 +30,20 @@ from datetime import datetime
 import pandas as pd
 
 # ── 路径常量（与 event_map_query.py 保持一致）─────────────────────────
-TECH_DIR = os.path.expanduser("~/Desktop/tz/科技产业事件")
-NONFIN_DIR = os.path.expanduser("~/Desktop/tz")
-COMPANY_POOL = os.path.expanduser("~/Desktop/tz/公司.xlsx")
-CODE_MAP_CSV = os.path.expanduser("~/Desktop/tz/company_code_map.csv")
-CHATGPT_MIGRATE = os.path.expanduser("~/Desktop/tz/chatgpt迁移包")
-SKILL_DIR = os.path.expanduser("~/.claude/skills/update-event-map")
-QUERY_SCRIPT = os.path.expanduser("~/.claude/skills/stock-analysis/scripts/event_map_query.py")
+WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
+    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+))
+REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
+DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
+TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
+NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
+COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
+CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
+CHATGPT_MIGRATE = os.path.join(WORKSPACE_ROOT, "迁移归档")
+SKILL_DIR = os.path.join(REPO_ROOT, "skills", "update-event-map")
+QUERY_SCRIPT = os.path.join(
+    REPO_ROOT, "skills", "stock-analysis", "scripts", "event_map_query.py"
+)
 
 # ── 科技版列定义 ─────────────────────────────────────────────────────
 TECH_TABLES = {
@@ -469,10 +476,11 @@ def cmd_next_ids(source, table, count=5, sector=None, date=None):
 # PART 5: validate
 # ═══════════════════════════════════════════════════════════════════════
 
-def cmd_validate(source="tech"):
+def cmd_validate(source="tech", strict_refs=False):
     csv_dir = find_latest_csv_dir(source)
     tables = get_tables(source)
     warnings = []
+    reference_notes = []
 
     events_df, _ = load_csv(csv_dir, "events")
     if events_df is None:
@@ -482,24 +490,29 @@ def cmd_validate(source="tech"):
             print(f"  ⚠️ {w}")
         return warnings
 
-    event_ids = set(events_df["事件ID"].astype(str).tolist())
-
-    for tname in ("mapping", "forward", "signals_early"):
-        if tname not in tables:
-            continue
-        tdef = tables[tname]
-        df, _ = load_csv(csv_dir, tdef["prefix"])
-        if df is None:
-            continue
-        eid_col = "事件ID" if "事件ID" in df.columns else "event_id"
-        if eid_col not in df.columns:
-            continue
-        for _, row in df.iterrows():
-            ref_ids = str(row[eid_col]).split(";")
-            for rid in ref_ids:
-                rid = rid.strip()
-                if rid and rid != "nan" and rid not in event_ids:
-                    warnings.append(f"{tname}.{eid_col}={rid} 在events表中不存在")
+    if strict_refs:
+        event_ids = set(
+            events_df["事件ID"].dropna().astype(str).str.strip().tolist()
+        )
+        for tname in ("mapping", "forward", "signals_early"):
+            if tname not in tables:
+                continue
+            tdef = tables[tname]
+            df, _ = load_csv(csv_dir, tdef["prefix"])
+            if df is None:
+                continue
+            eid_col = "事件ID" if "事件ID" in df.columns else "event_id"
+            if eid_col not in df.columns:
+                continue
+            for _, row in df.iterrows():
+                # 历史数据同时使用分号和逗号表达复合引用。
+                ref_ids = re.split(r"[;,，；]", str(row[eid_col]))
+                for rid in ref_ids:
+                    rid = rid.strip()
+                    if rid and rid != "nan" and rid not in event_ids:
+                        reference_notes.append(
+                            f"{tname}.{eid_col}={rid} 未进入events主表"
+                        )
 
     for tname, tdef in tables.items():
         id_col = tdef.get("id_col")
@@ -508,7 +521,9 @@ def cmd_validate(source="tech"):
         df, _ = load_csv(csv_dir, tdef["prefix"])
         if df is None:
             continue
-        dups = df[df[id_col].duplicated(keep=False)]
+        ids = df[id_col]
+        valid_ids = ids.notna() & ids.astype(str).str.strip().ne("")
+        dups = df[valid_ids & ids.duplicated(keep=False)]
         if not dups.empty:
             dup_ids = dups[id_col].unique().tolist()
             warnings.append(f"{tname} 有重复ID: {dup_ids[:5]}")
@@ -528,6 +543,11 @@ def cmd_validate(source="tech"):
         print(f"{len(warnings)} 个问题")
         for w in warnings[:20]:
             print(f"  ⚠️ {w}")
+    if strict_refs:
+        unique_notes = list(dict.fromkeys(reference_notes))
+        print(f"严格引用检查: {len(unique_notes)} 个候选/外部引用")
+        for note in unique_notes[:20]:
+            print(f"  ℹ️ {note}")
     return warnings
 
 
@@ -635,7 +655,7 @@ def cmd_export_excel(source="tech", csv_dir=None, output_path=None):
 def cmd_migrate(output_dir=None):
     date = datetime.now().strftime("%Y%m%d")
     if output_dir is None:
-        output_dir = os.path.join(os.path.expanduser("~/Desktop/tz"), f"迁移包_{date}")
+        output_dir = os.path.join(WORKSPACE_ROOT, f"迁移包_{date}")
 
     # 每次全新生成，不在旧目录上叠加——否则历史版本的目录结构/已删除脚本的残留
     # 会一直躺在里面（曾发现05_技能代码/top-picks_references是06-30遗留，早已过期）。
@@ -707,7 +727,7 @@ def cmd_migrate(output_dir=None):
             shutil.copy2(src, os.path.join(output_dir, "07_技能代码"))
 
     # 08: 框架版本快照
-    fw_versions_dir = os.path.expanduser("~/Desktop/tz/framework_versions")
+    fw_versions_dir = os.path.join(WORKSPACE_ROOT, "framework_versions")
     if os.path.isdir(fw_versions_dir):
         dst_fw = os.path.join(output_dir, "08_框架版本快照")
         for vdir in sorted(os.listdir(fw_versions_dir)):
@@ -718,10 +738,10 @@ def cmd_migrate(output_dir=None):
     # Also copy current analysis template + scripts directly（唯一权威清单——
     # 每次新增技能脚本必须加进这个列表，否则迁移包会静默漏掉，见2026-07-10教训）
     for src in (
-        os.path.expanduser("~/.claude/skills/stock-analysis/references/analysis-prompt-template.md"),
-        os.path.expanduser("~/.claude/skills/stock-analysis/scripts/catalyst_window_model.py"),
-        os.path.expanduser("~/.claude/skills/stock-analysis/scripts/framework_snapshot.py"),
-        os.path.expanduser("~/.claude/skills/top-picks/references/catalyst_left_side_scanner.py"),
+        os.path.join(REPO_ROOT, "skills", "stock-analysis", "references", "analysis-prompt-template.md"),
+        os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts", "catalyst_window_model.py"),
+        os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts", "framework_snapshot.py"),
+        os.path.join(REPO_ROOT, "skills", "top-picks", "references", "catalyst_left_side_scanner.py"),
     ):
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(output_dir, "07_技能代码"))
@@ -732,18 +752,14 @@ def cmd_migrate(output_dir=None):
 
 ## 恢复步骤
 
-1. 将本迁移包放入 ~/Desktop/tz/
-2. 解压 02_科技主线数据库/CSV包_{date}.zip 到 ~/Desktop/tz/科技产业事件/csv{date[-4:]}/
-3. 解压 03_非科技主线数据库/CSV包_{date}.zip 到 ~/Desktop/tz/非科技主线产业事件地图_CSV包_{date}/
-4. 将 04_代表公司分类池/ 下的文件复制到 ~/Desktop/tz/
-5. 将 07_技能代码/event_map_updater.py 放入 ~/.claude/skills/update-event-map/scripts/
-6. 将 07_技能代码/SKILL.md 放入 ~/.claude/skills/update-event-map/
-7. 将 07_技能代码/event_map_query.py 和 catalyst_window_model.py 放入 ~/.claude/skills/stock-analysis/scripts/
-8. 将 07_技能代码/analysis-prompt-template.md 放入 ~/.claude/skills/stock-analysis/references/
-9. 将 07_技能代码/catalyst_left_side_scanner.py 放入 ~/.claude/skills/top-picks/references/
-10. 将 07_技能代码/framework_snapshot.py 放入 ~/.claude/skills/stock-analysis/scripts/
-11. 将 08_框架版本快照/ 复制到 ~/Desktop/tz/framework_versions/
-12. 将 05_历史材料/ 中的memory/*.md 复制到 ~/.claude/projects/对应目录/memory/
+1. 将本迁移包放入 $TZ_CODEX_HOME/迁移归档/
+2. 解压 02_科技主线数据库/CSV包_{date}.zip 到 $TZ_CODEX_HOME/技能数据/科技产业事件/csv{date[-4:]}/
+3. 解压 03_非科技主线数据库/CSV包_{date}.zip 到 $TZ_CODEX_HOME/技能数据/非科技产业事件地图/
+4. 将 04_代表公司分类池/ 下的文件复制到 $TZ_CODEX_HOME/技能数据/
+5. 将 07_技能代码/中的脚本恢复到 $TZ_CODEX_HOME/repo/skills/ 对应目录
+6. 将 08_框架版本快照/ 复制到 $TZ_CODEX_HOME/framework_versions/
+7. 将 05_历史材料/ 中的 memory/*.md 复制到 $TZ_CODEX_HOME/repo/memory/
+8. 运行 event_map_updater.py status 验证数据完整性
 
 ## 数据概况
 
@@ -801,10 +817,15 @@ def main():
     p_excel.add_argument("--output", help="输出路径（默认自动生成）")
 
     p_migrate = sub.add_parser("migrate", help="生成迁移包（科技+非科技+公司池）")
-    p_migrate.add_argument("--output", help="输出目录（默认~/Desktop/tz/迁移包_日期）")
+    p_migrate.add_argument("--output", help="输出目录（默认$TZ_CODEX_HOME/迁移包_日期）")
 
     p_validate = sub.add_parser("validate", help="跨表一致性检查")
     p_validate.add_argument("--source", choices=["tech", "nonfin"], default="tech")
+    p_validate.add_argument(
+        "--strict-refs",
+        action="store_true",
+        help="额外列出尚未进入events主表的候选/外部事件引用",
+    )
 
     p_sync = sub.add_parser("sync-pool", help="手动重跑公司池同步（正常由apply自动触发，仅用于补录/调试）")
     p_sync.add_argument("--source", choices=["tech", "nonfin"], default="tech")
@@ -828,7 +849,7 @@ def main():
     elif args.cmd == "migrate":
         cmd_migrate(args.output)
     elif args.cmd == "validate":
-        cmd_validate(args.source)
+        cmd_validate(args.source, strict_refs=args.strict_refs)
     elif args.cmd == "sync-pool":
         with open(args.changes, encoding="utf-8") as f:
             changes = json.load(f)

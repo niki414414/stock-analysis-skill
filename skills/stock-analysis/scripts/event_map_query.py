@@ -2,8 +2,8 @@
 """查询产业事件地图周报CSV，供框架Layer2/3使用。
 
 支持两个数据源：
-  tech   （默认）科技主线  → ~/Desktop/tz/科技产业事件/csvMMDD/
-  nonfin          非科技主线 → ~/Desktop/tz/非科技主线产业事件地图_*/
+  tech   （默认）科技主线  → $TZ_CODEX_HOME/技能数据/科技产业事件/csvMMDD/
+  nonfin          非科技主线 → $TZ_CODEX_HOME/技能数据/非科技产业事件地图/
 
 用法：
   python3 event_map_query.py events --sector AI算力
@@ -24,10 +24,14 @@ import re
 
 import pandas as pd
 
-TECH_DIR   = os.path.expanduser("~/Desktop/tz/科技产业事件")
-NONFIN_DIR = os.path.expanduser("~/Desktop/tz")  # scan for 非科技主线产业事件地图_* folders
-COMPANY_POOL = os.path.expanduser("~/Desktop/tz/公司.xlsx")
-CODE_MAP_CSV = os.path.expanduser("~/Desktop/tz/company_code_map.csv")
+WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
+    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+))
+DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
+TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
+NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
+COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
+CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
 
 # 公司表一级赛道 → 事件地图一级赛道 映射字典
 # 公司表里一个赛道可能对应事件地图多个赛道（用列表），查询时逐个搜

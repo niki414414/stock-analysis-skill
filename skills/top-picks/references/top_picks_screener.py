@@ -19,7 +19,11 @@ from datetime import datetime, timedelta
 
 warnings.filterwarnings("ignore")
 
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/stock-analysis/scripts"))
+WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
+    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+))
+REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
+sys.path.insert(0, os.path.join(REPO_ROOT, "skills", "stock-analysis", "scripts"))
 from event_map_query import find_latest_csv_dir, load_csv as _load_event_map_csv  # noqa: E402
 
 
@@ -47,7 +51,7 @@ def load_sector_status() -> dict:
 
 
 def _load_env_file():
-    env_path = os.path.expanduser("~/.claude/skills/.env")
+    env_path = os.path.join(REPO_ROOT, ".env")
     if not os.path.exists(env_path):
         return
     with open(env_path) as f:
@@ -974,7 +978,7 @@ def _theme_breakdown(universe: list) -> dict:
 UNIVERSE_DEFAULT = "/tmp/tp_universe.json"
 SCREEN_CACHE_PREFIX = "/tmp/tp_screen_"
 STATIC_UNIVERSE_PATH = os.path.expanduser(
-    "~/.claude/skills/top-picks/config/stock_universe.yaml"
+    os.path.join(REPO_ROOT, "skills", "top-picks", "config", "stock_universe.yaml")
 )
 
 

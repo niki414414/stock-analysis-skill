@@ -14,24 +14,29 @@ import os
 import shutil
 from datetime import datetime
 
-TEMPLATE_PATH = os.path.expanduser(
-    "~/.claude/skills/stock-analysis/references/analysis-prompt-template.md"
+WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
+    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
+))
+REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
+STOCK_SKILL_DIR = os.path.join(REPO_ROOT, "skills", "stock-analysis")
+TEMPLATE_PATH = os.path.join(
+    STOCK_SKILL_DIR, "references", "analysis-prompt-template.md"
 )
-OUTPUT_FORMAT = os.path.expanduser(
-    "~/.claude/skills/stock-analysis/references/output-format-template.md"
+OUTPUT_FORMAT = os.path.join(
+    STOCK_SKILL_DIR, "references", "output-format-template.md"
 )
-VERSIONS_DIR = os.path.expanduser("~/Desktop/tz/framework_versions")
-SKILL_MD = os.path.expanduser("~/.claude/skills/stock-analysis/SKILL.md")
-UPDATER_SCRIPT = os.path.expanduser(
-    "~/.claude/skills/update-event-map/scripts/event_map_updater.py"
+VERSIONS_DIR = os.path.join(WORKSPACE_ROOT, "framework_versions")
+SKILL_MD = os.path.join(STOCK_SKILL_DIR, "SKILL.md")
+UPDATER_SCRIPT = os.path.join(
+    REPO_ROOT, "skills", "update-event-map", "scripts", "event_map_updater.py"
 )
-QUERY_SCRIPT = os.path.expanduser(
-    "~/.claude/skills/stock-analysis/scripts/event_map_query.py"
+QUERY_SCRIPT = os.path.join(
+    STOCK_SKILL_DIR, "scripts", "event_map_query.py"
 )
-SCANNER_SCRIPT = os.path.expanduser(
-    "~/.claude/skills/top-picks/references/signal_scanner.py"
+SCANNER_SCRIPT = os.path.join(
+    REPO_ROOT, "skills", "top-picks", "references", "catalyst_left_side_scanner.py"
 )
-MEMORY_DIR = os.path.expanduser("~/.claude/projects/-Users-niki/memory")
+MEMORY_DIR = os.path.join(REPO_ROOT, "memory")
 
 
 def cmd_snapshot(version: str, note: str):
@@ -72,10 +77,10 @@ Note: {note}
 {chr(10).join(f'- {f}' for f in copied)}
 
 ## Restore Instructions
-1. Copy framework/ files to ~/.claude/skills/stock-analysis/references/
-2. Copy skills/SKILL.md to ~/.claude/skills/stock-analysis/
-3. Copy scripts/ to respective skill directories
-4. Copy memory/ to ~/.claude/projects/-Users-niki/memory/ (or new project path)
+1. Copy framework/ files to $TZ_CODEX_HOME/repo/skills/stock-analysis/references/
+2. Copy skills/SKILL.md to $TZ_CODEX_HOME/repo/skills/stock-analysis/
+3. Copy scripts/ to the corresponding folders under $TZ_CODEX_HOME/repo/skills/
+4. Copy memory/ to $TZ_CODEX_HOME/repo/memory/
 5. Run: python3 event_map_updater.py status  # verify data integrity
 """
     with open(os.path.join(version_dir, "MANIFEST.md"), "w") as f:
