@@ -42,10 +42,28 @@ python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/market_opportunity_ra
 
 - 用指数、广度、成交额识别异常结构；
 - 扫描申万一级行业相对沪深300的当日/5日/20日强弱；
+- 用申万成分股聚合5日 Tushare `moneyflow`，计算资金连续性；
+- 将行业上涨家数与全市场上涨比例比较，避免普涨日候选泛滥；
 - 直接调用非科技事件地图 `window`，不依赖当前缺失的 `sectors_status` 表；
+- 将沪深300质量池作为 `quality_core` 标签接入，不把质量等同买点；
+- 合并 `quality_core`、`catalyst`、`market_response` 三种独立候选来源；
 - 将方向分为 `active_catalyst_found` 与
   `coverage_gap_requires_external_search`；
 - 输出待核验公司和外部搜索词，但不输出买入信号。
+
+优先读取新增的 `sector_opportunity_map`：
+
+- `evidence_cluster`：相对强度、相对市场广度、持续资金、有效催化中至少三项
+  聚集，且必须同时通过相对强度和持续资金；
+- `research_candidate`：有两项证据，但尚不足以称机会聚集；
+- `weak_or_unconfirmed`：只有一项或没有有效证据；
+- `candidates[].tags`：`quality_core`、`catalyst`、`market_response`；
+- 只有两个及以上独立标签的公司才标为 `six_layer_priority`，单标签只能观察；
+- `opportunity_snapshot_meta.moneyflow` 必须检查 `latest_trade_date` 和 `lagged`。
+  资金数据未发布时保持不可用，不能填0，也不能换免费源。
+
+`advance_ratio` 只描述行业内部上涨比例；正式判断使用
+`advance_excess_vs_market`。普涨修复日不得把绝对高广度当成板块独立走强证据。
 
 ### STEP 2：异常波动原因核验
 
@@ -74,6 +92,8 @@ python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/market_opportunity_ra
 
 - `active_catalyst_found`：联网核实事件是否真实、仍在有效期、当天是否新增；
 - `coverage_gap_requires_external_search`：搜索政策、订单、涨价、业绩和供需变化；
+- `sector_opportunity_map` 中板块成立但没有双标签公司：明确输出“板块成立、公司待发现”，
+  不得因为质量池或事件公司池为空而静默跳过；
 - 只有单日防守性上涨、无新增催化：标为“资金避险候选”，不称新主线；
 - 有催化但没有板块扩散：标为“题材试探”；
 - 有资金持续性、有效催化、板块扩散：才标为“轮动候选”；
@@ -107,6 +127,7 @@ python3 "$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py" \
 ## 降级处理
 
 - 单个数据源失败：标明不可用，继续用其余证据，不补造数字。
+- 行情与资金日期不同：分别标注 `price_date`、`moneyflow_date`；不得默认同日。
 - 非科技状态表缺失：属已知限制，雷达不调用 `status --source nonfin`。
 - 事件地图无覆盖：生成外部搜索队列；搜索仍无可靠证据则不操作。
 - 联网搜索不可用：只给结构诊断和待核验清单，不给确定性原因或机会结论。

@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -38,6 +39,13 @@ EVENT_QUERY = (
 NONFIN_ROOT = DATA_ROOT / "非科技产业事件地图"
 COMPANY_POOL = DATA_ROOT / "公司.xlsx"
 CODE_MAP = DATA_ROOT / "company_code_map.csv"
+QUALITY_CACHE = (
+    REPO_ROOT
+    / "skills"
+    / "quality-compounder"
+    / "cache"
+    / "fundamentals_cache.json"
+)
 
 TECH_SECTORS = {"电子", "计算机", "通信", "国防军工"}
 BUCKET_WEIGHT = {"red": 4, "yellow": 3, "green": 2, "blue": 1, "gray": 0}
@@ -288,6 +296,443 @@ def company_candidates(
     return candidates[:limit], gaps
 
 
+def load_quality_pool(path: Path = QUALITY_CACHE) -> tuple[dict[str, dict], dict]:
+    """Load the latest quality-compounder Stage 1 cache as a read-only label."""
+    if not path.exists():
+        return {}, {"status": "missing", "path": str(path)}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        rows = {
+            normalize_code(row.get("ts_code")): row
+            for row in payload.get("candidates", [])
+            if normalize_code(row.get("ts_code"))
+        }
+        return rows, {
+            "status": "ok",
+            "path": str(path),
+            "trade_date": payload.get("trade_date"),
+            "candidate_count": len(rows),
+        }
+    except Exception as exc:
+        return {}, {
+            "status": "invalid",
+            "path": str(path),
+            "error": str(exc),
+        }
+
+
+def classify_sector_evidence(
+    *,
+    excess_5d: float,
+    advance_ratio: float,
+    market_advance_ratio: float,
+    positive_flow_days_5d: Optional[int],
+    cumulative_flow_yi_5d: Optional[float],
+    latest_flow_yi: Optional[float],
+    active_catalyst: bool,
+) -> tuple[str, dict]:
+    """Classify evidence without a weighted score.
+
+    Absolute breadth is compared with the whole market so a broad rebound does
+    not make most sectors look independently strong. Missing moneyflow remains
+    missing and never silently becomes zero.
+    """
+    advance_excess = advance_ratio - market_advance_ratio
+    relative_strength = excess_5d >= 2
+    relative_breadth = advance_excess >= 5
+    persistent_flow = (
+        positive_flow_days_5d is not None
+        and cumulative_flow_yi_5d is not None
+        and latest_flow_yi is not None
+        and positive_flow_days_5d >= 3
+        and cumulative_flow_yi_5d > 0
+        and latest_flow_yi > 0
+    )
+    gates = {
+        "relative_strength": bool(relative_strength),
+        "relative_breadth": bool(relative_breadth),
+        "persistent_flow": bool(persistent_flow),
+        "active_catalyst": bool(active_catalyst),
+    }
+    gate_count = sum(gates.values())
+    if persistent_flow and relative_strength and gate_count >= 3:
+        state = "evidence_cluster"
+    elif gate_count >= 2:
+        state = "research_candidate"
+    else:
+        state = "weak_or_unconfirmed"
+    return state, {
+        "advance_excess_vs_market": round(advance_excess, 1),
+        "gates": gates,
+    }
+
+
+def merge_candidate_labels(
+    quality_rows: list[dict],
+    catalyst_rows: list[dict],
+    response_rows: list[dict],
+) -> list[dict]:
+    """Merge independent candidate sources without inventing a total score."""
+    merged = defaultdict(lambda: {"tags": set()})
+    for rows in (quality_rows, catalyst_rows, response_rows):
+        for row in rows:
+            code = normalize_code(row.get("code"))
+            if not code:
+                continue
+            merged[code].update(
+                {key: value for key, value in row.items() if key != "tags"}
+            )
+            merged[code]["code"] = code
+            merged[code]["tags"].update(row.get("tags", []))
+    output = []
+    for row in merged.values():
+        row["tags"] = sorted(row["tags"])
+        row["evidence_count"] = len(row["tags"])
+        row["next_action"] = (
+            "six_layer_priority"
+            if row["evidence_count"] >= 2
+            else "watch_only"
+        )
+        output.append(row)
+    output.sort(
+        key=lambda row: (
+            row["evidence_count"],
+            row.get("net_mf_yi")
+            if row.get("net_mf_yi") is not None else -10**9,
+        ),
+        reverse=True,
+    )
+    return output
+
+
+def fetch_latest_moneyflow_frames(
+    pro,
+    trade_date: str,
+    days: int = 5,
+) -> tuple[dict[str, pd.DataFrame], dict]:
+    """Fetch the latest *valid* Tushare moneyflow dates independently.
+
+    Price and moneyflow publish at different times. Empty frames are skipped,
+    and callers receive an explicit unavailable status instead of zero-filled
+    flow.
+    """
+    end = datetime.strptime(trade_date, "%Y%m%d")
+    try:
+        calendar = pro.trade_cal(
+            exchange="SSE",
+            start_date=(end - timedelta(days=20)).strftime("%Y%m%d"),
+            end_date=trade_date,
+        )
+        open_days = sorted(
+            calendar.loc[calendar["is_open"] == 1, "cal_date"].astype(str),
+            reverse=True,
+        )
+    except Exception as exc:
+        return {}, {"status": "unavailable", "error": str(exc)}
+
+    frames = {}
+    errors = []
+    for flow_date in open_days:
+        try:
+            frame = pro.moneyflow(
+                trade_date=flow_date,
+                fields=(
+                    "ts_code,trade_date,net_mf_amount,"
+                    "buy_lg_amount,sell_lg_amount,"
+                    "buy_elg_amount,sell_elg_amount"
+                ),
+            )
+            if frame is not None and not frame.empty:
+                frames[flow_date] = frame
+        except Exception as exc:
+            errors.append({"trade_date": flow_date, "error": str(exc)})
+        if len(frames) >= days:
+            break
+    if not frames:
+        return {}, {
+            "status": "unavailable",
+            "requested_trade_date": trade_date,
+            "errors": errors,
+        }
+    latest = next(iter(frames))
+    return frames, {
+        "status": "ok",
+        "requested_trade_date": trade_date,
+        "latest_trade_date": latest,
+        "lagged": latest < trade_date,
+        "valid_days": list(frames),
+        "errors": errors,
+    }
+
+
+def build_sector_opportunity_map(
+    *,
+    pro,
+    rotation: list[dict],
+    trade_date: str,
+    market_advance_ratio: float,
+    events: pd.DataFrame,
+    active_windows: dict[str, dict],
+    aliases: dict[str, list[str]],
+    pool: pd.DataFrame,
+    code_map: pd.DataFrame,
+) -> tuple[list[dict], dict]:
+    """Build the balanced market→sector→candidate shadow-safe snapshot."""
+    quality_pool, quality_meta = load_quality_pool()
+    moneyflow_frames, moneyflow_meta = fetch_latest_moneyflow_frames(
+        pro, trade_date
+    )
+    try:
+        daily = pro.daily(
+            trade_date=trade_date,
+            fields="ts_code,trade_date,close,pct_chg,vol,amount",
+        )
+    except Exception as exc:
+        return [], {
+            "status": "unavailable",
+            "error": f"daily({trade_date}) failed: {exc}",
+            "quality_pool": quality_meta,
+            "moneyflow": moneyflow_meta,
+        }
+    if daily is None or daily.empty:
+        return [], {
+            "status": "unavailable",
+            "error": f"daily({trade_date}) returned empty",
+            "quality_pool": quality_meta,
+            "moneyflow": moneyflow_meta,
+        }
+    if market_advance_ratio <= 0:
+        market_advance_ratio = round(
+            float(
+                (
+                    pd.to_numeric(daily["pct_chg"], errors="coerce") > 0
+                ).mean() * 100
+            ),
+            1,
+        )
+    try:
+        basics = pro.stock_basic(
+            exchange="", list_status="L", fields="ts_code,name"
+        )
+        name_map = dict(zip(basics["ts_code"], basics["name"]))
+    except Exception:
+        name_map = {}
+
+    latest_flow = None
+    if moneyflow_frames:
+        latest_flow = moneyflow_frames[next(iter(moneyflow_frames))].copy()
+        latest_flow = latest_flow.drop(columns=["trade_date"], errors="ignore")
+        stocks = daily.merge(latest_flow, on="ts_code", how="left")
+    else:
+        stocks = daily.copy()
+    numeric_fields = [
+        "pct_chg", "amount", "net_mf_amount",
+        "buy_lg_amount", "sell_lg_amount",
+        "buy_elg_amount", "sell_elg_amount",
+    ]
+    for field in numeric_fields:
+        if field in stocks:
+            stocks[field] = pd.to_numeric(stocks[field], errors="coerce")
+    if latest_flow is not None:
+        stocks["large_net"] = (
+            stocks["buy_lg_amount"].fillna(0)
+            - stocks["sell_lg_amount"].fillna(0)
+            + stocks["buy_elg_amount"].fillna(0)
+            - stocks["sell_elg_amount"].fillna(0)
+        )
+
+    classes = pro.index_classify(level="L1", src="SW2021")
+    class_code = dict(zip(classes["industry_name"], classes["index_code"]))
+    opportunity_map = []
+    membership_errors = []
+    for rotation_row in rotation:
+        sector = rotation_row["sector"]
+        index_code = class_code.get(sector) or rotation_row.get("index_code")
+        try:
+            members = pro.index_member_all(l1_code=index_code)
+        except Exception as exc:
+            membership_errors.append({"sector": sector, "error": str(exc)})
+            continue
+        if members is None or members.empty:
+            membership_errors.append({"sector": sector, "error": "empty"})
+            continue
+        current = members[
+            members["is_new"].astype(str).str.upper().isin(["Y", "1"])
+        ]
+        if current.empty:
+            current = members
+        member_codes = {
+            normalize_code(value) for value in current["ts_code"]
+            if normalize_code(value)
+        }
+        sector_stocks = stocks[
+            stocks["ts_code"].map(normalize_code).isin(member_codes)
+        ].copy()
+        if sector_stocks.empty:
+            membership_errors.append({
+                "sector": sector,
+                "error": "no daily rows for current members",
+            })
+            continue
+        advance_ratio = round(
+            float((sector_stocks["pct_chg"] > 0).mean() * 100), 1
+        )
+
+        latest_flow_yi = None
+        large_order_yi = None
+        positive_flow_days = None
+        cumulative_flow_yi = None
+        flow_history = []
+        if moneyflow_frames:
+            for flow_date, frame in moneyflow_frames.items():
+                member_flow = frame[
+                    frame["ts_code"].map(normalize_code).isin(member_codes)
+                ]
+                net = pd.to_numeric(
+                    member_flow["net_mf_amount"], errors="coerce"
+                )
+                flow_history.append({
+                    "trade_date": flow_date,
+                    "net_flow_yi": round(float(net.sum()) / 10000, 2),
+                })
+            latest_flow_yi = flow_history[0]["net_flow_yi"]
+            positive_flow_days = sum(
+                row["net_flow_yi"] > 0 for row in flow_history
+            )
+            cumulative_flow_yi = round(
+                sum(row["net_flow_yi"] for row in flow_history), 2
+            )
+            large_order_yi = round(
+                float(
+                    sector_stocks.loc[
+                        sector_stocks["large_net"].notna(), "large_net"
+                    ].sum()
+                ) / 10000,
+                2,
+            )
+
+        matches = find_matching_events(
+            sector, events, active_windows, aliases
+        )
+        catalyst_rows, mapping_gaps = company_candidates(
+            matches[:4], pool, code_map
+        )
+        catalyst_candidates = [
+            {
+                **row,
+                "tags": ["catalyst"],
+            }
+            for row in catalyst_rows if row.get("code")
+        ]
+        quality_candidates = [
+            {
+                "code": code,
+                "name": quality_pool[code].get("name"),
+                "pe_ttm": quality_pool[code].get("pe_ttm"),
+                "cagr_np": quality_pool[code].get("cagr_np"),
+                "tags": ["quality_core"],
+            }
+            for code in sorted(member_codes.intersection(quality_pool))
+        ]
+        response_candidates = []
+        if latest_flow is not None:
+            ranked = sector_stocks.copy()
+            ranked["response_score"] = (
+                ranked["pct_chg"].rank(pct=True)
+                + ranked["net_mf_amount"].rank(pct=True)
+                + ranked["amount"].rank(pct=True)
+            )
+            ranked = ranked.sort_values("response_score", ascending=False)
+            for _, row in ranked.head(5).iterrows():
+                response_candidates.append({
+                    "code": normalize_code(row["ts_code"]),
+                    "name": name_map.get(row["ts_code"]),
+                    "pct_chg": round(float(row["pct_chg"]), 2),
+                    "net_mf_yi": (
+                        round(float(row["net_mf_amount"]) / 10000, 2)
+                        if pd.notna(row["net_mf_amount"]) else None
+                    ),
+                    "amount_yi": round(float(row["amount"]) / 100000, 2),
+                    "tags": ["market_response"],
+                })
+        merged_candidates = merge_candidate_labels(
+            quality_candidates,
+            catalyst_candidates,
+            response_candidates,
+        )
+
+        active_catalyst = bool(matches)
+        state_label, classification = classify_sector_evidence(
+            excess_5d=float(rotation_row["excess_5d_vs_csi300"]),
+            advance_ratio=advance_ratio,
+            market_advance_ratio=market_advance_ratio,
+            positive_flow_days_5d=positive_flow_days,
+            cumulative_flow_yi_5d=cumulative_flow_yi,
+            latest_flow_yi=latest_flow_yi,
+            active_catalyst=active_catalyst,
+        )
+        opportunity_map.append({
+            "sector": sector,
+            "index_code": index_code,
+            "is_tech": rotation_row["is_tech"],
+            "state": state_label,
+            "evidence": {
+                "price_date": trade_date,
+                "excess_today_vs_csi300": rotation_row[
+                    "excess_today_vs_csi300"
+                ],
+                "excess_5d_vs_csi300": rotation_row[
+                    "excess_5d_vs_csi300"
+                ],
+                "excess_20d_vs_csi300": rotation_row[
+                    "excess_20d_vs_csi300"
+                ],
+                "advance_ratio": advance_ratio,
+                **classification,
+                "moneyflow_date": moneyflow_meta.get("latest_trade_date"),
+                "moneyflow_lagged": moneyflow_meta.get("lagged"),
+                "latest_net_flow_yi": latest_flow_yi,
+                "positive_flow_days_5d": positive_flow_days,
+                "cumulative_net_flow_yi_5d": cumulative_flow_yi,
+                "large_order_proxy_yi": large_order_yi,
+                "active_catalyst": active_catalyst,
+            },
+            "active_events": matches[:4],
+            "quality_core_count": len(quality_candidates),
+            "catalyst_candidate_count": len(catalyst_candidates),
+            "company_mapping_gaps": mapping_gaps,
+            "candidates": merged_candidates[:12],
+        })
+    state_weight = {
+        "evidence_cluster": 2,
+        "research_candidate": 1,
+        "weak_or_unconfirmed": 0,
+    }
+    opportunity_map.sort(
+        key=lambda row: (
+            state_weight[row["state"]],
+            row["evidence"].get("cumulative_net_flow_yi_5d")
+            if row["evidence"].get("cumulative_net_flow_yi_5d") is not None
+            else -10**9,
+            row["evidence"]["excess_5d_vs_csi300"],
+        ),
+        reverse=True,
+    )
+    return opportunity_map, {
+        "status": "ok",
+        "price_date": trade_date,
+        "market_advance_ratio": market_advance_ratio,
+        "moneyflow": moneyflow_meta,
+        "quality_pool": quality_meta,
+        "membership_errors": membership_errors,
+        "candidate_rule": (
+            "two_or_more independent tags -> six_layer_priority; "
+            "one tag -> watch_only"
+        ),
+        "no_buy_signal": True,
+    }
+
+
 def diagnose_abnormal_structure(state: Optional[dict]) -> dict:
     if not state:
         return {"triggered": False, "reason": "未提供market-state JSON"}
@@ -347,6 +792,20 @@ def build_radar(state: Optional[dict], top: int) -> dict:
     active_windows = load_active_windows()
     aliases = load_aliases()
     pool, code_map = load_company_sources()
+    market_advance_ratio = float(
+        (state or {}).get("breadth_today", {}).get("advance_pct") or 0
+    )
+    opportunity_map, opportunity_meta = build_sector_opportunity_map(
+        pro=pro,
+        rotation=rotation,
+        trade_date=trade_date,
+        market_advance_ratio=market_advance_ratio,
+        events=events,
+        active_windows=active_windows,
+        aliases=aliases,
+        pool=pool,
+        code_map=code_map,
+    )
 
     selected = []
     for row in rotation:
@@ -394,11 +853,17 @@ def build_radar(state: Optional[dict], top: int) -> dict:
         "trade_date": trade_date,
         "abnormal_structure": diagnose_abnormal_structure(state),
         "rotation_candidates": selected,
+        "sector_opportunity_map": opportunity_map,
+        "opportunity_snapshot_meta": opportunity_meta,
         "data_sources": {
             "rotation": "Tushare申万一级行业index_daily",
+            "sector_members": "Tushare index_member_all(SW2021)",
+            "sector_breadth": "Tushare daily按申万一级行业成分聚合",
+            "sector_moneyflow": "Tushare moneyflow按申万一级行业成分聚合",
             "event_directory": str(event_dir),
             "event_window": "event_map_query.py window --source nonfin",
             "company_pool": str(COMPANY_POOL),
+            "quality_pool": str(QUALITY_CACHE),
         },
         "known_limitations": [
             "非科技sectors_status表缺失，因此不调用status命令",
@@ -406,6 +871,9 @@ def build_radar(state: Optional[dict], top: int) -> dict:
             "事件地图可能漏项，coverage gap必须触发外部搜索",
             "event_text_fallback公司关联必须经公告/业务核实后才能使用",
             "脚本不替代个股质量、估值、价格和盈亏比检查",
+            "sector_opportunity_map中的科技催化仍由正式工作流STEP 4核验",
+            "大单/特大单只代表订单规模代理，不能识别真实机构身份",
+            "质量池是候选标签，不是全市场股票宇宙，也不产生买入结论",
         ],
     }
 
