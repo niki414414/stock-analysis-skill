@@ -32,7 +32,13 @@ warnings.filterwarnings("ignore")
 
 
 def _load_env_file():
-    """Load the workspace .env into os.environ (only sets missing vars)."""
+    """Load workspace configuration, preferring its Tushare token.
+
+    Desktop processes can retain an obsolete shell token after ``repo/.env`` is
+    refreshed.  Tushare is a project-scoped primary data source here, so the
+    checked workspace location is authoritative for that one credential.
+    Other environment variables keep the conventional process-first behavior.
+    """
     workspace_root = os.path.abspath(os.path.expanduser(
         os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
     ))
@@ -46,7 +52,9 @@ def _load_env_file():
                 continue
             key, _, val = line.partition("=")
             key, val = key.strip(), val.strip()
-            if key and val and key not in os.environ:
+            if key == "TUSHARE_TOKEN" and val:
+                os.environ[key] = val
+            elif key and val and key not in os.environ:
                 os.environ[key] = val
 
 
