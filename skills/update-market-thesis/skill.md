@@ -164,19 +164,11 @@ THESIS=~/.claude/skills/stock-analysis/references/market_thesis.md
 
 ---
 
-## STEP 8：同步迁移包
+## STEP 8：进入统一备份流程
 
-每次更新底稿后，执行以下两条命令，确保迁移包始终是最新状态：
-
-```bash
-cp ~/.claude/skills/stock-analysis/references/market_thesis.md \
-   ~/Desktop/tz/迁移包_latest/07_技能代码/market_thesis.md
-
-cp ~/.claude/skills/update-market-thesis/skill.md \
-   ~/Desktop/tz/迁移包_latest/07_技能代码/update-market-thesis_SKILL.md
-```
-
-执行完后告知用户："迁移包已同步（market_thesis.md + skill.md）"
+底稿更新完成后，与其他实质性框架修改一样处理：审核与校验 → Git commit →
+GitHub push → 运行 `$TZ_CODEX_HOME/repo/scripts/create_local_backup.py`。不再手工复制到
+`迁移包_latest`，避免只同步个别文件而漏掉关联脚本和配置。
 
 ---
 
@@ -205,7 +197,7 @@ cp ~/.claude/skills/update-market-thesis/skill.md \
 
 ---
 底稿已更新：[模块列表]
-迁移包已同步
+备份状态：待完成统一备份流程
 ```
 
 ---

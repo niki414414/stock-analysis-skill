@@ -219,44 +219,29 @@ python3 $UPDATER sync-pool --source tech --changes /tmp/event_map_changes.json
 
 ---
 
-## STEP 6: 导出Excel + 迁移包（每次更新自动执行）
+## STEP 6: 导出Excel + 统一备份（每次实质性更新后执行）
 
 ```bash
 # Excel导出
-python3 $UPDATER export-excel --source tech --output ~/Desktop/tz/科技产业事件/{MMDD}.xlsx
+python3 $UPDATER export-excel --source tech \
+  --output "$TZ_CODEX_HOME/技能数据/科技产业事件/{MMDD}.xlsx"
 
-# 迁移包自动生成（覆盖最新版，含框架快照）
-python3 $UPDATER migrate --output ~/Desktop/tz/迁移包_latest
+# 数据与代码校验通过后，在 repo 中提交并推送。
+# 然后生成统一离线包（Git bundle + 活动数据 + SHA-256）。
+python3 "$TZ_CODEX_HOME/repo/scripts/create_local_backup.py"
 ```
 
 Excel包含10个sheet（00_使用说明 到 10_早期信号追踪），冻结首行，自适应列宽。
-迁移包自动覆盖到固定路径`迁移包_latest`，始终是最新完整备份。
+离线包写入 `$TZ_CODEX_HOME/迁移归档/`，保留时间戳恢复点并在生成后自动复验。
 
 ---
 
-## STEP 7: 框架快照 + 迁移包
+## STEP 7: 版本与恢复边界
 
-**自动快照触发条件**（框架实质性修改时必须执行）：
-- analysis-prompt-template.md 新增/修改了层级规则（如v4.6左侧试探）
-- signal_scanner.py 修改了池子来源或评分逻辑
-- 新增了skill或重大工作流变更
-
-```bash
-# 创建框架版本快照
-python3 ~/.claude/skills/stock-analysis/scripts/framework_snapshot.py snapshot \
-  --version {版本号} --note "{变更说明}"
-
-# 查看历史版本
-python3 ~/.claude/skills/stock-analysis/scripts/framework_snapshot.py list
-```
-
-**迁移包生成**（每次事件地图更新后自动执行）：
-```bash
-python3 $UPDATER migrate --output ~/Desktop/tz/迁移包_{YYYYMMDD}
-```
-
-迁移包包含：科技+非科技数据库、公司池、技能代码、**框架版本快照**、历史材料、恢复指南。
-新账号拿到迁移包后按README步骤恢复，所有技能和数据完整可用。
+- Git commit/tag 是唯一框架版本记录，不再另建框架快照。
+- GitHub 是异地备份；`create_local_backup.py` 生成的 ZIP 是离线容灾备份。
+- 备份脚本遇到未提交修改会拒绝运行；必须先审核、验证和提交。
+- 新设备/新工具优先从 GitHub clone；无网络时从 ZIP 内 Git bundle clone，再恢复活动数据。
 
 ---
 

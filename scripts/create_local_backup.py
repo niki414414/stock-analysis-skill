@@ -105,6 +105,13 @@ def create_backup() -> Path:
     if not REPO.is_dir():
         raise FileNotFoundError(f"Git仓库不存在: {REPO}")
 
+    status = run("git", "status", "--porcelain", cwd=REPO)
+    if status:
+        raise RuntimeError(
+            "Git工作树存在未提交变更，已拒绝生成可能漏文件的备份。\n"
+            "请先审核、测试并提交变更，再重新运行本脚本。"
+        )
+
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     ARCHIVE_ROOT.mkdir(parents=True, exist_ok=True)
     package_name = f"tz-codex-backup-{timestamp}"
@@ -115,7 +122,15 @@ def create_backup() -> Path:
 
         head = run("git", "rev-parse", "HEAD", cwd=REPO)
         branch = run("git", "branch", "--show-current", cwd=REPO)
-        status = run("git", "status", "--porcelain", cwd=REPO)
+        upstream = run(
+            "git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}",
+            cwd=REPO,
+        )
+        divergence = run(
+            "git", "rev-list", "--left-right", "--count", f"{upstream}...HEAD",
+            cwd=REPO,
+        ).split()
+        behind, ahead = (int(divergence[0]), int(divergence[1]))
 
         # HEAD源码快照不含.git、忽略文件或凭据。
         source_zip = stage / "01_代码与记忆" / "repo-source.zip"
@@ -148,7 +163,10 @@ def create_backup() -> Path:
             "workspace": str(WORKSPACE),
             "git_head": head,
             "git_branch": branch,
-            "git_worktree_clean": not bool(status),
+            "git_worktree_clean": True,
+            "git_upstream": upstream,
+            "git_ahead": ahead,
+            "git_behind": behind,
             "copied_targets": copied,
             "missing_optional_targets": missing,
             "credentials_included": False,
@@ -218,7 +236,10 @@ def main() -> None:
         verify_backup(args.verify.expanduser().resolve())
         print("迁移包校验通过")
         return
-    output = create_backup()
+    try:
+        output = create_backup()
+    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as exc:
+        parser.error(str(exc))
     print(output)
 
 

@@ -101,7 +101,8 @@ metadata:
 ## STEP 6：改完之后
 
 - 按`feedback_tool_integration_standard`的标准确认新逻辑真正接入了消费方（不是加了字段没人用）
-- 同步进`~/Desktop/tz/repo`，commit信息里说清楚改了什么、为什么、验证过程是什么
+- 修改直接落在`$TZ_CODEX_HOME/repo`，commit信息里说清楚改了什么、为什么、验证过程是什么；
+  按仓库 README 的统一备份流程推送 GitHub 并生成本地离线包
 - 需要push时按平时的git安全规范处理（不主动push除非已经建立"每次实质性改动后主动同步"的约定，参见`project-backup-repo-20260702`）
 
 ---
