@@ -1,0 +1,18 @@
+{
+  "model_inference_cost_down": {
+    "label": "模型推理成本下降",
+    "mechanism": "单位调用成本下降，扩大可商业化场景并改善高调用量应用的毛利空间",
+    "target_sectors": ["计算机", "传媒"],
+    "target_themes": ["AI应用", "企业软件", "Agent", "游戏", "内容生成", "数字营销"],
+    "entity_keywords": ["OpenAI"],
+    "change_keywords": ["模型降价", "价格下调", "API降价", "收费下调", "价格减半"]
+  },
+  "ota_platform_restriction_removed": {
+    "label": "OTA平台限制解除",
+    "mechanism": "酒店自主定价与跨平台经营空间改善，利润传导仍需佣金率和RevPAR验证",
+    "target_sectors": ["社会服务"],
+    "target_themes": ["酒店", "OTA", "出行"],
+    "entity_keywords": ["携程"],
+    "change_keywords": ["反垄断", "全网最低价", "酒店自主定价"]
+  }
+}

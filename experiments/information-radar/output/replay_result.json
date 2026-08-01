@@ -1,0 +1,46 @@
+[
+  {
+    "trade_date": "20260731",
+    "signal_id": "POC-20260730-001",
+    "signal_title": "OpenAI模型价格/性价比变化线索",
+    "variable": "model_inference_cost_down",
+    "sector": "计算机",
+    "sector_rank": 2,
+    "pct_chg": 5.5618,
+    "volume_ratio": 1.525,
+    "event_map_covered": false,
+    "coverage_gap": true,
+    "mechanism": "单位调用成本下降，扩大可商业化场景并改善高调用量应用的毛利空间",
+    "target_themes": [
+      "AI应用",
+      "企业软件",
+      "Agent",
+      "游戏",
+      "内容生成",
+      "数字营销"
+    ],
+    "verification": "官方资料确认新模型家族存在显著性价比变化，但7月30日具体调价型号和前后价格仍待逐项核实"
+  },
+  {
+    "trade_date": "20260731",
+    "signal_id": "POC-20260730-001",
+    "signal_title": "OpenAI模型价格/性价比变化线索",
+    "variable": "model_inference_cost_down",
+    "sector": "传媒",
+    "sector_rank": 1,
+    "pct_chg": 6.0036,
+    "volume_ratio": 1.685,
+    "event_map_covered": false,
+    "coverage_gap": true,
+    "mechanism": "单位调用成本下降，扩大可商业化场景并改善高调用量应用的毛利空间",
+    "target_themes": [
+      "AI应用",
+      "企业软件",
+      "Agent",
+      "游戏",
+      "内容生成",
+      "数字营销"
+    ],
+    "verification": "官方资料确认新模型家族存在显著性价比变化，但7月30日具体调价型号和前后价格仍待逐项核实"
+  }
+]

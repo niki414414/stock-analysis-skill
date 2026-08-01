@@ -1,0 +1,24 @@
+{
+  "trade_date": "20260731",
+  "universe_size": 31,
+  "signals": [
+    {
+      "signal_id": "POC-20260730-001",
+      "observed_at": "2026-07-30",
+      "title": "OpenAI模型价格/性价比变化线索",
+      "variable": "model_inference_cost_down",
+      "source_level": "A_pending_exact_change",
+      "verification": "官方资料确认新模型家族存在显著性价比变化，但7月30日具体调价型号和前后价格仍待逐项核实"
+    }
+  ],
+  "sectors": [
+    {"rank": 1, "code": "801760.SI", "name": "传媒", "pct_chg": 6.0036, "volume_ratio": 1.685},
+    {"rank": 2, "code": "801750.SI", "name": "计算机", "pct_chg": 5.5618, "volume_ratio": 1.525},
+    {"rank": 3, "code": "801230.SI", "name": "综合", "pct_chg": 5.0424, "volume_ratio": 0.987},
+    {"rank": 4, "code": "801770.SI", "name": "通信", "pct_chg": 4.2619, "volume_ratio": 1.252},
+    {"rank": 5, "code": "801890.SI", "name": "机械设备", "pct_chg": 3.5589, "volume_ratio": 1.231},
+    {"rank": 6, "code": "801080.SI", "name": "电子", "pct_chg": 3.5308, "volume_ratio": 1.193},
+    {"rank": 7, "code": "801210.SI", "name": "社会服务", "pct_chg": 2.5700, "volume_ratio": 1.265}
+  ]
+}
+

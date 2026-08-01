@@ -1,0 +1,8 @@
+theme_group,display_name,sector_ids,event_keywords,mandatory_metrics,core_validation
+high_beta,机器人,"humanoid_body;humanoid_parts;industrial_robot;machine_vision;physical_ai","机器人;具身智能;Physical AI;灵巧手;执行器;减速器;丝杠","当日/5日/20日篮子涨幅;板块广度;成交与资金;催化窗口","PPA/订单;产线;周产量;良率;客户;毛利率"
+high_beta,商业航天,"commercial_space;satellite_comms","商业航天;火箭;卫星;星座;6G;可回收","当日/5日/20日篮子涨幅;发射窗口;成交与资金;催化窗口","发射/回收;在轨数量;招标;订单;运营收入"
+high_beta,脑机接口,"","脑机接口;脑电;植入式;非侵入式","相关事件强度;关联公司价格广度;成交与资金;催化窗口","临床;注册;疗效;手术量;支付;商业化"
+high_beta,工业母机,"cnc_machine_tools;industrial_robot","工业母机;数控机床;数控系统;主轴;刀具;高端装备","当日/5日/20日篮子涨幅;板块广度;成交与资金;催化窗口","订单;设备更新;国产化率;客户认证;收入;毛利率"
+policy_backed,六张网与新兴支柱,"commercial_space;low_altitude_economy;innovative_drug;nev_core;rail_transit","六张网;低空经济;创新药;新能源汽车;轨道交通;卫星互联网","子主题逐项涨幅;资金持续性;政策/项目窗口","规划转项目;招标;订单;开工;收入"
+policy_backed,科技基础设施,"ai_chip;ai_infra;power_grid;power_ups_cooling;optical_module_cpo;pcb_ai_server;fiber_optical_dc;ai_network_infra;smart_grid;satellite_comms","科技基建;AI基础设施;数据中心;算力;电网;特高压;光通信;卫星互联网","当日/5日/20日篮子涨幅;资本开支;成交与资金;催化窗口","Capex;招标;订单;上电;交付;收入;现金流"
+policy_backed,国产替代与自主可控,"ai_chip;ai_chip_domestic;equipment_etch_cvd;equipment_measure;equipment_cmp_clean;equipment_packaging;material_wafer;material_photoresist;material_specialty_gas;material_wet_chemicals;material_precursor;design_eda_ip;foundry;packaging_advanced","国产替代;自主可控;国产算力;半导体设备;半导体材料;EDA;先进封装;工业软件","子赛道相对强弱;资金持续性;事件与修正;客户验证","国产化率;客户认证;招标订单;良率;产能;收入;毛利率"
