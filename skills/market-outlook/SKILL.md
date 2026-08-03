@@ -47,6 +47,7 @@ python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/market_opportunity_ra
 - 直接调用非科技事件地图 `window`，不依赖当前缺失的 `sectors_status` 表；
 - 将沪深300质量池作为 `quality_core` 标签接入，不把质量等同买点；
 - 合并 `quality_core`、`catalyst`、`market_response` 三种独立候选来源；
+- 公司—事件正式关系默认从SQLite读取；Excel只作为显式双读或紧急回退；
 - 将方向分为 `active_catalyst_found` 与
   `coverage_gap_requires_external_search`；
 - 输出待核验公司和外部搜索词，但不输出买入信号。
@@ -101,6 +102,9 @@ python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/market_opportunity_ra
 
 公司关联为 `event_text_fallback` 或 `event_text_code_map_only` 时，必须查公告或公司业务
 资料确认，不能直接采用。
+
+SQLite返回的`benefit_tier=主题观察`同样只作低层级召回，不得跳过六层第三层的主营和
+业务占比核验。
 
 ### STEP 4：科技主线与事件修正
 

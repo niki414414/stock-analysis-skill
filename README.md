@@ -19,6 +19,7 @@ python3 scripts/event_db.py sector AI应用
 python3 scripts/event_db.py event AI-SAAS-2026-001
 python3 scripts/event_db.py catalysts --sector AI应用
 python3 scripts/event_db.py compare sector AI应用
+python3 scripts/event_db.py migration-status
 ```
 
 迁移状态与切换边界见`memory/project-event-store-sqlite-shadow.md`。

@@ -18,7 +18,9 @@
 - 构建/查询CLI：`repo/scripts/event_db.py`
 - 共享存储层：`repo/skills/shared/event_store.py`
 - 旧查询兼容入口新增：`db-company / sector / event / catalysts / search / db-audit`
+- `top-picks`与`market-outlook`公司召回默认读取SQLite；`--company-source excel`仅用于回退和双读。
 - `event_map_updater.py apply`完成后自动重建影子库，失败只告警、不影响CSV主库。
+- `apply`成功后按输入文件指纹记录真实材料更新轮次；重复build或相同快照不计数。
 
 ## 常用命令
 
@@ -32,6 +34,7 @@ python3 repo/scripts/event_db.py search Agent安全
 python3 repo/scripts/event_db.py compare company 金山办公
 python3 repo/scripts/event_db.py compare sector AI应用
 python3 repo/scripts/event_db.py audit
+python3 repo/scripts/event_db.py migration-status
 ```
 
 兼容入口：
@@ -65,6 +68,15 @@ python3 repo/skills/stock-analysis/scripts/event_map_query.py sector AI应用
 - 公司池的原“置信度”仅作为`mapping_confidence`保留，不等同证据等级。
 - `benefit_directness / evidence_grade / commercial_stage`已从事件关系表移除，防止把六层的
   公司兑现与交易判断重复前置。
+
+## 消费端迁移验收（2026-08-03）
+
+- 非科技活跃事件双读：SQLite与Excel均召回87家公司，集合一致。
+- `top-picks`活跃事件双读：SQLite 48家、Excel 32家；SQLite新增17家均来自正式mapping，
+  并排除1家Excel按事件ID跨科技/非科技串线的误匹配（`BAT-2026-002`）。
+- 真实Tushare端到端：`top-picks`从SQLite召回26家并完成价格筛选；`market-outlook`完成
+  31个申万一级行业雷达，输出`company_source_mode=sqlite`。
+- 三轮真实材料更新门槛当前为`0/3`；本次重复build不计入材料更新轮次。
 
 ## 切换边界
 

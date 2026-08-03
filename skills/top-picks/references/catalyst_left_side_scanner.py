@@ -43,9 +43,12 @@ WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
     os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
 ))
 REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
 COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
 CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
+EVENT_DB = os.path.join(DATA_ROOT, "event_map_shadow.db")
 CSV_BASE_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 
 # ── 申万行业轮动雷达 ──────────────────────────────────────────────────────────
@@ -246,8 +249,66 @@ def parse_event_ids(val) -> list:
         return []
     return re.findall(r'[A-Z][A-Z0-9-]*-\d{4}-\d{3}', str(val))
 
-def load_company_candidates(active_events: pd.DataFrame) -> pd.DataFrame:
-    """从公司.xlsx找出关联活跃事件的A股公司，解析股票代码。"""
+def _aggregate_company_candidates(rows: list[dict]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+    raw = pd.DataFrame(rows).sort_values("catalyst_score", ascending=False)
+    aggregated = []
+    for _, group in raw.groupby("code", sort=False):
+        primary = group.iloc[0].to_dict()
+        primary["event_ids"] = ";".join(dict.fromkeys(group["event_id"].astype(str)))
+        primary["event_names"] = "；".join(dict.fromkeys(group["event_name"].astype(str)))
+        primary["matched_catalyst_count"] = int(group["event_id"].nunique())
+        primary["roles"] = "；".join(dict.fromkeys(
+            (group["sector"].astype(str) + "/" + group["sub_sector"].astype(str)).tolist()
+        ))
+        if "benefit_tier" in group:
+            primary["benefit_tiers"] = "；".join(dict.fromkeys(group["benefit_tier"].astype(str)))
+        aggregated.append(primary)
+    df = pd.DataFrame(aggregated)
+    log.info(f"候选公司: {len(df)} 家")
+    return df
+
+
+def _load_company_candidates_sqlite(active_events: pd.DataFrame) -> pd.DataFrame:
+    from skills.shared.event_store import EventStore
+
+    refs = [
+        (str(row.get("source", "tech")), str(row["事件ID"]))
+        for _, row in active_events.iterrows()
+    ]
+    links = EventStore(EVENT_DB).companies_for_events(refs)
+    if not links:
+        return pd.DataFrame()
+    event_rows = {
+        (str(row.get("source", "tech")), str(row["事件ID"])): row
+        for _, row in active_events.iterrows()
+    }
+    rows = []
+    for link in links:
+        event = event_rows.get((link["source"], link["event_id"]))
+        if event is None:
+            continue
+        rows.append({
+            "code": link["stock_code"],
+            "name": link["company_name"],
+            "event_id": link["event_id"],
+            "event_name": str(event["事件名称"])[:30],
+            "event_status": str(event["当前状态"]),
+            "event_bucket": str(event["bucket"]),
+            "catalyst_score": event["catalyst_score"],
+            "sector": link.get("sector") or link.get("industry_1") or "",
+            "sub_sector": link.get("role_2") or "",
+            "relation_status": link.get("relation_status"),
+            "benefit_tier": link.get("benefit_tier"),
+            "mapping_confidence": link.get("mapping_confidence"),
+            "company_source": "sqlite",
+        })
+    return _aggregate_company_candidates(rows)
+
+
+def _load_company_candidates_excel(active_events: pd.DataFrame) -> pd.DataFrame:
+    """Emergency compatibility reader for the legacy Excel company pool."""
     active_ids = set(active_events["事件ID"].dropna())
     event_score_map = dict(zip(active_events["事件ID"], active_events["catalyst_score"]))
     event_name_map  = dict(zip(active_events["事件ID"], active_events["事件名称"].astype(str).str[:30]))
@@ -291,28 +352,24 @@ def load_company_candidates(active_events: pd.DataFrame) -> pd.DataFrame:
                 "catalyst_score": event_score_map.get(matched_id, 0),
                 "sector":        str(row.get("一级赛道", "")),
                 "sub_sector":    str(row.get("二级环节", "")),
+                "relation_status": "Excel兼容",
+                "benefit_tier": "未分层",
+                "mapping_confidence": str(row.get("置信度", "")),
+                "company_source": "excel_fallback",
             })
 
-    if not rows:
-        return pd.DataFrame()
+    return _aggregate_company_candidates(rows)
 
-    # 同一公司可能有多条产业角色和多项活跃催化。保留最高分催化作为主事件，
-    # 同时聚合全部命中，避免旧逻辑“取第一个事件+按代码去重”静默丢信息。
-    raw = pd.DataFrame(rows).sort_values("catalyst_score", ascending=False)
-    aggregated = []
-    for _, group in raw.groupby("code", sort=False):
-        primary = group.iloc[0].to_dict()
-        primary["event_ids"] = ";".join(dict.fromkeys(group["event_id"].astype(str)))
-        primary["event_names"] = "；".join(dict.fromkeys(group["event_name"].astype(str)))
-        primary["matched_catalyst_count"] = int(group["event_id"].nunique())
-        primary["roles"] = "；".join(dict.fromkeys(
-            (group["sector"].astype(str) + "/" + group["sub_sector"].astype(str)).tolist()
-        ))
-        aggregated.append(primary)
 
-    df = pd.DataFrame(aggregated)
-    log.info(f"候选公司: {len(df)} 家")
-    return df
+def load_company_candidates(active_events: pd.DataFrame, source: str = "sqlite") -> pd.DataFrame:
+    """Resolve active-event companies from SQLite; Excel is explicit fallback only."""
+    if source == "excel":
+        return _load_company_candidates_excel(active_events)
+    try:
+        return _load_company_candidates_sqlite(active_events)
+    except Exception as exc:
+        log.warning(f"SQLite公司关系读取失败，启用Excel紧急回退: {exc}")
+        return _load_company_candidates_excel(active_events)
 
 # ── Step 3: 价格未动验证 ──────────────────────────────────────────────────────
 def fetch_price_batch(pro, codes: list, trade_date: str, n_days: int = 65) -> dict:
@@ -617,6 +674,8 @@ def main():
     parser.add_argument("--top",              type=int,   default=20,  help="输出前N个")
     parser.add_argument("--min-event-score",  type=int,   default=3,   help="最低催化分（window模型final_score×bucket权重后的值）")
     parser.add_argument("--json",             action="store_true",      help="JSON输出")
+    parser.add_argument("--company-source",   choices=("sqlite", "excel"), default="sqlite",
+                        help="公司关系来源；默认SQLite，excel仅用于紧急回退/双读验收")
     args = parser.parse_args()
 
     pro = _get_pro()
@@ -633,7 +692,7 @@ def main():
     log.info(f"催化分≥{args.min_event_score} 的事件: {len(active_events)} 个")
 
     # Step 2: 公司映射
-    candidates = load_company_candidates(active_events)
+    candidates = load_company_candidates(active_events, source=args.company_source)
     if candidates.empty:
         print("无候选公司")
         return

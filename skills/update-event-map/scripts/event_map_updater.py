@@ -423,12 +423,18 @@ def cmd_apply(source, date_short, label, changes_path):
     # 影子期：CSV仍是写入主源，每次apply后自动重建SQLite投影。
     # 失败只告警，不回滚已经验证过的CSV更新；切换为SQLite主库前再收紧为事务级失败。
     try:
-        from skills.shared.event_store import build_shadow_database
+        from skills.shared.event_store import build_shadow_database, record_shadow_update_cycle
         db_audit = build_shadow_database()
+        migration_history = record_shadow_update_cycle(db_audit, {
+            "source": source, "date_short": date_short, "label": label,
+            "changes_path": os.path.abspath(changes_path),
+        })
         print(f"\nSQLite影子库: ✓ 已重建 "
               f"(events={db_audit['counts'].get('events', 0)}, "
               f"company_event_links={db_audit['counts'].get('company_event_links', 0)}, "
               f"anomalies={db_audit['counts'].get('import_anomalies', 0)})")
+        print(f"迁移观察轮次: {migration_history['completed_unique_cycles']}/"
+              f"{migration_history['required_unique_cycles']}（仅唯一材料快照计数）")
     except Exception as exc:
         print(f"\nSQLite影子库: ⚠️ 重建失败，不影响CSV主库: {exc}")
 

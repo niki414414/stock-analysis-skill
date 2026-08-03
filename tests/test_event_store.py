@@ -1,5 +1,6 @@
 import importlib.util
 import sqlite3
+import json
 from pathlib import Path
 
 
@@ -40,6 +41,7 @@ def test_event_store_company_sector_and_event_queries(tmp_path):
     company = store.company("300001")
     sector = store.sector("AI应用")
     event = store.event("AI-SAAS-2026-001")
+    candidates = store.companies_for_events([("tech", "AI-SAAS-2026-001")])
 
     assert company[0]["company_name"] == "示例软件"
     assert company[0]["role_3"] == "工作流Agent"
@@ -47,6 +49,9 @@ def test_event_store_company_sector_and_event_queries(tmp_path):
     assert company[0]["benefit_tier"] == "明确映射"
     assert sector[0]["event_id"] == "AI-SAAS-2026-001"
     assert event[0]["stock_code"] == "300001"
+    assert candidates[0]["company_name"] == "示例软件"
+    assert candidates[0]["benefit_tier"] == "明确映射"
+    assert store.companies_for_events([]) == []
 
 
 def test_extract_known_companies_ignores_generic_company_types():
@@ -80,3 +85,23 @@ def test_pool_benefit_tier_only_downgrades_explicit_theme_wording():
     assert module.pool_benefit_tier({
         "二级环节": "高容MLCC", "三级环节/定位": "陶瓷粉体", "备注": "客户仍待六层核验"
     }) == "角色关联"
+
+
+def test_migration_cycle_counts_only_unique_validated_snapshots(tmp_path):
+    module = load_store_module()
+    history_path = tmp_path / "history.json"
+    audit = {
+        "integrity": "ok", "foreign_key_errors": 0,
+        "input_files": {"events.csv": "hash-a"},
+        "sources": {"tech": "csv0803"}, "counts": {"events": 1},
+        "coverage": {"event_linked_companies": 1},
+    }
+    first = module.record_shadow_update_cycle(audit, {"label": "one"}, history_path)
+    duplicate = module.record_shadow_update_cycle(audit, {"label": "duplicate"}, history_path)
+    audit["input_files"]["events.csv"] = "hash-b"
+    second = module.record_shadow_update_cycle(audit, {"label": "two"}, history_path)
+
+    assert first["completed_unique_cycles"] == 1
+    assert duplicate["completed_unique_cycles"] == 1
+    assert second["completed_unique_cycles"] == 2
+    assert json.loads(history_path.read_text())["remaining_cycles"] == 1

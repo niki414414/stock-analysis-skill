@@ -30,6 +30,8 @@ WORKSPACE_ROOT = Path(
     ))
 )
 REPO_ROOT = WORKSPACE_ROOT / "repo"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 DATA_ROOT = WORKSPACE_ROOT / "技能数据"
 SKILL_ROOT = REPO_ROOT / "skills" / "market-outlook"
 ALIASES_PATH = SKILL_ROOT / "config" / "sector_aliases.json"
@@ -231,13 +233,23 @@ def find_matching_events(
     return matches
 
 
-def load_company_sources() -> tuple[pd.DataFrame, pd.DataFrame]:
-    pool = pd.read_excel(
-        COMPANY_POOL, sheet_name="非科技公司池", dtype=str
-    ).fillna("")
+def load_company_sources(source: str = "sqlite"):
     code_map = pd.read_csv(CODE_MAP, dtype=str).fillna("")
     code_map["code"] = code_map["code"].apply(normalize_code)
-    return pool, code_map
+    if source == "excel":
+        pool = pd.read_excel(
+            COMPANY_POOL, sheet_name="非科技公司池", dtype=str
+        ).fillna("")
+        return pool, code_map, None
+    try:
+        from skills.shared.event_store import EventStore
+        return pd.DataFrame(), code_map, EventStore(DATA_ROOT / "event_map_shadow.db")
+    except Exception as exc:
+        print(f"[WARN] SQLite公司关系读取失败，启用Excel紧急回退: {exc}", file=sys.stderr)
+        pool = pd.read_excel(
+            COMPANY_POOL, sheet_name="非科技公司池", dtype=str
+        ).fillna("")
+        return pool, code_map, None
 
 
 def company_candidates(
@@ -245,42 +257,73 @@ def company_candidates(
     pool: pd.DataFrame,
     code_map: pd.DataFrame,
     limit: int = 12,
+    store=None,
+    event_source: str = "nonfin",
 ) -> tuple[list[dict], list[str]]:
     event_ids = {row["event_id"] for row in event_matches}
     event_text = " ".join(row["company_text"] for row in event_matches)
     candidates = []
     seen = set()
-    for _, company in pool.iterrows():
-        name = str(company.get("公司名称", "")).strip()
-        refs = {
-            part
-            for part in re.split(
-                r"[\s,，;；/|]+",
-                str(company.get("关联事件ID", "")).strip(),
+    if store is not None:
+        try:
+            links = store.companies_for_events(
+                [(event_source, event_id) for event_id in event_ids]
             )
-            if part
-        }
-        if not name:
-            continue
-        source = None
-        if event_ids.intersection(refs):
-            source = "structured_event_link"
-        elif name in event_text:
-            source = "event_text_fallback"
-        if not source or name in seen:
-            continue
-        code_rows = code_map[code_map["name"] == name]
-        code = (
-            code_rows.iloc[0]["code"]
-            if not code_rows.empty else None
-        )
-        candidates.append({
-            "name": name,
-            "code": code,
-            "link_source": source,
-            "confidence": str(company.get("置信度", "")),
-        })
-        seen.add(name)
+        except Exception as exc:
+            print(f"[WARN] SQLite候选查询失败，启用Excel紧急回退: {exc}", file=sys.stderr)
+            fallback_pool = pd.read_excel(
+                COMPANY_POOL, sheet_name="非科技公司池", dtype=str
+            ).fillna("")
+            return company_candidates(
+                event_matches, fallback_pool, code_map, limit=limit,
+                store=None, event_source=event_source,
+            )
+        for link in links:
+            name = link["company_name"]
+            if name in seen:
+                continue
+            candidates.append({
+                "name": name,
+                "code": link["stock_code"],
+                "link_source": "structured_event_link",
+                "confidence": link.get("mapping_confidence") or "",
+                "relation_status": link.get("relation_status"),
+                "benefit_tier": link.get("benefit_tier"),
+                "company_source": "sqlite",
+            })
+            seen.add(name)
+    else:
+        for _, company in pool.iterrows():
+            name = str(company.get("公司名称", "")).strip()
+            refs = {
+                part
+                for part in re.split(
+                    r"[\s,，;；/|]+",
+                    str(company.get("关联事件ID", "")).strip(),
+                )
+                if part
+            }
+            if not name:
+                continue
+            link_source = None
+            if event_ids.intersection(refs):
+                link_source = "structured_event_link"
+            elif name in event_text:
+                link_source = "event_text_fallback"
+            if not link_source or name in seen:
+                continue
+            code_rows = code_map[code_map["name"] == name]
+            code = code_rows.iloc[0]["code"] if not code_rows.empty else None
+            candidates.append({
+                "name": name,
+                "code": code,
+                "link_source": link_source,
+                "confidence": str(company.get("置信度", "")),
+                "relation_status": "Excel兼容",
+                "benefit_tier": "未分层",
+                "company_source": "excel_fallback",
+            })
+            seen.add(name)
     gaps = sorted(
         name for name in code_map["name"].astype(str).unique()
         if name and name in event_text and name not in seen
@@ -292,6 +335,9 @@ def company_candidates(
             "code": code,
             "link_source": "event_text_code_map_only",
             "confidence": "待核验",
+            "relation_status": "待验证",
+            "benefit_tier": "主题观察",
+            "company_source": "event_text_fallback",
         })
     return candidates[:limit], gaps
 
@@ -476,6 +522,7 @@ def build_sector_opportunity_map(
     aliases: dict[str, list[str]],
     pool: pd.DataFrame,
     code_map: pd.DataFrame,
+    company_store=None,
 ) -> tuple[list[dict], dict]:
     """Build the balanced market→sector→candidate shadow-safe snapshot."""
     quality_pool, quality_meta = load_quality_pool()
@@ -615,7 +662,7 @@ def build_sector_opportunity_map(
             sector, events, active_windows, aliases
         )
         catalyst_rows, mapping_gaps = company_candidates(
-            matches[:4], pool, code_map
+            matches[:4], pool, code_map, store=company_store
         )
         catalyst_candidates = [
             {
@@ -785,13 +832,15 @@ def diagnose_abnormal_structure(state: Optional[dict]) -> dict:
     }
 
 
-def build_radar(state: Optional[dict], top: int) -> dict:
+def build_radar(
+    state: Optional[dict], top: int, company_source: str = "sqlite"
+) -> dict:
     pro = get_pro()
     rotation, trade_date = fetch_rotation(pro)
     events, mappings, event_dir = load_nonfin_tables()
     active_windows = load_active_windows()
     aliases = load_aliases()
-    pool, code_map = load_company_sources()
+    pool, code_map, company_store = load_company_sources(company_source)
     market_advance_ratio = float(
         (state or {}).get("breadth_today", {}).get("advance_pct") or 0
     )
@@ -805,6 +854,7 @@ def build_radar(state: Optional[dict], top: int) -> dict:
         aliases=aliases,
         pool=pool,
         code_map=code_map,
+        company_store=company_store,
     )
 
     selected = []
@@ -822,7 +872,7 @@ def build_radar(state: Optional[dict], top: int) -> dict:
             row["sector"], events, active_windows, aliases
         )
         companies, gaps = company_candidates(
-            matches[:4], pool, code_map
+            matches[:4], pool, code_map, store=company_store
         )
         coverage = (
             "active_catalyst_found" if matches
@@ -862,7 +912,13 @@ def build_radar(state: Optional[dict], top: int) -> dict:
             "sector_moneyflow": "Tushare moneyflow按申万一级行业成分聚合",
             "event_directory": str(event_dir),
             "event_window": "event_map_query.py window --source nonfin",
-            "company_pool": str(COMPANY_POOL),
+            "company_relations": (
+                str(DATA_ROOT / "event_map_shadow.db")
+                if company_store is not None else str(COMPANY_POOL)
+            ),
+            "company_source_mode": (
+                "sqlite" if company_store is not None else "excel_fallback"
+            ),
             "quality_pool": str(QUALITY_CACHE),
         },
         "known_limitations": [
@@ -886,11 +942,17 @@ def main() -> None:
     )
     parser.add_argument("--top", type=int, default=8)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--company-source", choices=("sqlite", "excel"), default="sqlite",
+        help="公司关系来源；默认SQLite，excel仅用于紧急回退/双读验收",
+    )
     args = parser.parse_args()
     state = None
     if args.market_state:
         state = json.loads(Path(args.market_state).read_text(encoding="utf-8"))
-    result = build_radar(state, max(1, args.top))
+    result = build_radar(
+        state, max(1, args.top), company_source=args.company_source
+    )
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

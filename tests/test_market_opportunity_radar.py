@@ -161,6 +161,28 @@ class MarketOpportunityRadarTests(unittest.TestCase):
             by_name["三七互娱"]["link_source"], "structured_event_link"
         )
 
+    def test_company_candidates_use_sqlite_relations(self):
+        class Store:
+            def companies_for_events(self, refs):
+                self.refs = refs
+                return [{
+                    "company_name": "三七互娱", "stock_code": "002555",
+                    "relation_status": "映射已验证", "benefit_tier": "明确映射",
+                    "mapping_confidence": "高",
+                }]
+
+        store = Store()
+        rows, gaps = radar.company_candidates(
+            [{"event_id": "GAME-1", "company_text": "三七互娱"}],
+            pd.DataFrame(),
+            pd.DataFrame([{"name": "三七互娱", "code": "002555"}]),
+            store=store,
+        )
+        self.assertEqual(store.refs, [("nonfin", "GAME-1")])
+        self.assertEqual(rows[0]["company_source"], "sqlite")
+        self.assertEqual(rows[0]["benefit_tier"], "明确映射")
+        self.assertEqual(gaps, [])
+
     def test_sector_evidence_uses_relative_not_absolute_breadth(self):
         state, detail = radar.classify_sector_evidence(
             excess_5d=4.0,

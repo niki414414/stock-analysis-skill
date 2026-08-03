@@ -35,6 +35,7 @@ DATA_TARGETS = [
     Path("技能数据/公司.xlsx"),
     Path("技能数据/event_map_shadow.db"),
     Path("技能数据/event_db_audit.json"),
+    Path("技能数据/event_db_migration_history.json"),
     Path("技能数据/科技产业事件"),
     Path("技能数据/非科技产业事件地图"),
     Path("技能数据/market_daily_snapshot"),

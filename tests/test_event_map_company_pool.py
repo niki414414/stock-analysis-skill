@@ -94,9 +94,47 @@ def test_scanner_aggregates_multiple_active_events_per_company(tmp_path, monkeyp
          "当前状态": "行动", "bucket": "red"},
     ])
 
-    result = scanner.load_company_candidates(active)
+    result = scanner.load_company_candidates(active, source="excel")
 
     assert len(result) == 1
     assert result.iloc[0]["event_id"] == "EVT-2026-002"
     assert result.iloc[0]["matched_catalyst_count"] == 2
     assert set(result.iloc[0]["event_ids"].split(";")) == {"EVT-2026-001", "EVT-2026-002"}
+
+
+def test_scanner_reads_company_relations_from_sqlite(tmp_path, monkeypatch):
+    scanner = load_module(
+        "catalyst_scanner_sqlite_test",
+        ROOT / "skills/top-picks/references/catalyst_left_side_scanner.py",
+    )
+    store_module = load_module(
+        "event_store_scanner_test", ROOT / "skills/shared/event_store.py"
+    )
+    db = tmp_path / "event.db"
+    import sqlite3
+    con = sqlite3.connect(db)
+    con.executescript(store_module.SCHEMA_SQL)
+    con.execute("INSERT INTO companies(company_name,stock_code) VALUES('示例软件','300001')")
+    con.execute(
+        "INSERT INTO events(source,event_id,sector,event_name) VALUES('tech','EVT-2026-001','AI应用','事件一')"
+    )
+    company_id = con.execute("SELECT company_id FROM companies").fetchone()[0]
+    event_pk = con.execute("SELECT event_pk FROM events").fetchone()[0]
+    con.execute(
+        """INSERT INTO company_event_links(
+               company_id,event_pk,role_2,role_3,relation_status,benefit_tier,mapping_basis
+           ) VALUES(?,?,?,?,?,?,?)""",
+        (company_id,event_pk,"企业软件","工作流Agent","映射已验证","明确映射","测试"),
+    )
+    con.commit(); con.close()
+    monkeypatch.setattr(scanner, "EVENT_DB", str(db))
+    active = pd.DataFrame([{
+        "事件ID": "EVT-2026-001", "catalyst_score": 9, "事件名称": "事件一",
+        "当前状态": "行动", "bucket": "red", "source": "tech",
+    }])
+
+    result = scanner.load_company_candidates(active)
+
+    assert result.iloc[0]["code"] == "300001"
+    assert result.iloc[0]["company_source"] == "sqlite"
+    assert result.iloc[0]["benefit_tier"] == "明确映射"

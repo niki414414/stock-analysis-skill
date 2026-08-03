@@ -30,6 +30,7 @@ COMPANY_POOL = DATA_ROOT / "公司.xlsx"
 CODE_MAP = DATA_ROOT / "company_code_map.csv"
 DEFAULT_DB = DATA_ROOT / "event_map_shadow.db"
 DEFAULT_AUDIT = DATA_ROOT / "event_db_audit.json"
+DEFAULT_MIGRATION_HISTORY = DATA_ROOT / "event_db_migration_history.json"
 BJ_CODE_PREFIXES = ("83", "87", "88", "92", "43")
 EVENT_ID_RE = re.compile(r"[A-Z][A-Z0-9-]*-\d{4}-\d{3}")
 
@@ -667,6 +668,28 @@ class EventStore:
             (event_id,),
         )
 
+    def companies_for_events(self, event_refs: Iterable[tuple[str, str]]) -> list[dict[str, Any]]:
+        """Return normalized company links for exact ``(source, event_id)`` refs."""
+        refs = list(dict.fromkeys(
+            (str(source).strip(), str(event_id).strip())
+            for source, event_id in event_refs
+            if str(source).strip() and str(event_id).strip()
+        ))
+        if not refs:
+            return []
+        clauses = " OR ".join("(e.source=? AND e.event_id=?)" for _ in refs)
+        params = [value for ref in refs for value in ref]
+        return self._query(
+            f"""SELECT c.stock_code,c.company_name,e.source,e.event_id,e.sector,
+                       l.industry_1,l.role_2,l.role_3,l.relation_status,l.benefit_tier,
+                       l.mapping_basis,l.mapping_confidence,l.source_ref,l.last_verified
+                FROM events e JOIN company_event_links l USING(event_pk)
+                JOIN companies c USING(company_id)
+                WHERE {clauses}
+                ORDER BY e.source,e.event_id,c.company_name,l.role_2,l.role_3""",
+            params,
+        )
+
     def catalysts(self, sector: Optional[str] = None):
         if sector:
             return self._query(
@@ -701,3 +724,41 @@ def build_shadow_database(db_path: Union[Path, str] = DEFAULT_DB,
     audit_file.parent.mkdir(parents=True, exist_ok=True)
     audit_file.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
     return audit
+
+
+def record_shadow_update_cycle(
+    audit: dict[str, Any],
+    context: Optional[dict[str, Any]] = None,
+    history_path: Union[Path, str] = DEFAULT_MIGRATION_HISTORY,
+) -> dict[str, Any]:
+    """Record one unique, validated material-update snapshot for cutover gating."""
+    if audit.get("integrity") != "ok" or audit.get("foreign_key_errors") != 0:
+        raise ValueError("数据库完整性未通过，不得计入迁移观察轮次")
+    fingerprint_payload = json.dumps(
+        audit.get("input_files", {}), ensure_ascii=False, sort_keys=True
+    ).encode("utf-8")
+    fingerprint = hashlib.sha256(fingerprint_payload).hexdigest()
+    path = Path(history_path)
+    if path.exists():
+        history = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        history = {"schema_version": 1, "required_unique_cycles": 3, "cycles": []}
+    if not any(row.get("input_fingerprint") == fingerprint for row in history["cycles"]):
+        history["cycles"].append({
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "input_fingerprint": fingerprint,
+            "context": context or {},
+            "sources": audit.get("sources", {}),
+            "counts": audit.get("counts", {}),
+            "coverage": audit.get("coverage", {}),
+            "integrity": audit.get("integrity"),
+            "foreign_key_errors": audit.get("foreign_key_errors"),
+        })
+    history["completed_unique_cycles"] = len(history["cycles"])
+    history["remaining_cycles"] = max(
+        0, history["required_unique_cycles"] - history["completed_unique_cycles"]
+    )
+    history["material_cycle_gate_passed"] = history["remaining_cycles"] == 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+    return history

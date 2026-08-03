@@ -16,6 +16,7 @@ from skills.shared.event_store import (  # noqa: E402
     COMPANY_POOL,
     DEFAULT_AUDIT,
     DEFAULT_DB,
+    DEFAULT_MIGRATION_HISTORY,
     EventStore,
     build_shadow_database,
 )
@@ -116,6 +117,9 @@ def main():
     p_audit = sub.add_parser("audit", help="查询导入异常摘要")
     p_audit.add_argument("--json", action="store_true")
 
+    p_migration = sub.add_parser("migration-status", help="查看主库切换的真实材料更新轮次")
+    p_migration.add_argument("--json", action="store_true")
+
     p_cmp = sub.add_parser("compare", help="SQLite与旧公司池双读比较")
     p_cmp.add_argument("mode", choices=["company", "sector"])
     p_cmp.add_argument("keyword")
@@ -136,6 +140,16 @@ def main():
             }, ensure_ascii=False, indent=2))
         return
 
+    if args.cmd == "migration-status":
+        if DEFAULT_MIGRATION_HISTORY.exists():
+            payload = json.loads(DEFAULT_MIGRATION_HISTORY.read_text(encoding="utf-8"))
+        else:
+            payload = {
+                "required_unique_cycles": 3, "completed_unique_cycles": 0,
+                "remaining_cycles": 3, "material_cycle_gate_passed": False, "cycles": [],
+            }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
     store = EventStore(args.db)
     if args.cmd == "company":
         rows = store.company(args.keyword)
