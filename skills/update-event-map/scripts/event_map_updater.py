@@ -7,6 +7,7 @@
   export-excel  从CSV生成合并Excel
   migrate   生成迁移包（科技+非科技+公司池+脚本）
   validate  跨表一致性检查
+  reconcile-pool  用最新mapping全量对账并回填公司池
   next-ids  生成下一批事件ID
 
 用法：
@@ -424,6 +425,25 @@ def cmd_apply(source, date_short, label, changes_path):
 # PART 3b: 公司池同步（原STEP 5.5，从prompt指令改为代码函数，2026-07-10）
 # ═══════════════════════════════════════════════════════════════════════
 
+def _pool_role_key(name, event_id, sector, sub2, sub3):
+    """公司池按“公司×事件×产业角色”去重，保留同一公司的多重产业定位。"""
+    return tuple(str(x or "").strip() for x in (name, event_id, sector, sub2, sub3))
+
+
+def _extract_known_companies(rep, code_dict):
+    """优先用代码表做实体识别，兼容“定位样本：A、B”和带说明文字的代表公司字段。"""
+    text = str(rep or "")
+    matched = [name for name in code_dict if name and name in text]
+    if matched:
+        # 长名称优先，避免简称恰好是另一公司名称子串；保持文本出现顺序。
+        matched = sorted(set(matched), key=lambda name: (text.find(name), -len(name)))
+        return matched
+    return [
+        name.strip() for name in re.split(r'[、，,;；/]', text)
+        if len(name.strip()) >= 2
+    ]
+
+
 def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
     """从新增mapping行的"代表公司/公司类型"字段抽取公司名，自动补入公司.xlsx缺失的公司。
 
@@ -443,12 +463,26 @@ def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
     da_lei = "科技" if source == "tech" else "非科技"
 
     existing = pd.read_excel(COMPANY_POOL, sheet_name=sheet_name)
+    role_cols = ["公司名称", "一级赛道", "二级环节", "三级环节/定位", "关联事件ID"]
+    before_dedupe = len(existing)
+    existing = existing.drop_duplicates(subset=role_cols, keep="first").reset_index(drop=True)
+    deduped = before_dedupe - len(existing)
     existing_names = set(existing["公司名称"].astype(str))
+    existing_role_keys = set()
+    for _, old in existing.iterrows():
+        old_name = str(old.get("公司名称", "") or "").strip()
+        old_ids = re.findall(r'[A-Z][A-Z0-9-]*-\d{4}-\d{3}', str(old.get("关联事件ID", "") or ""))
+        if not old_ids:
+            old_ids = [""]
+        for old_id in old_ids:
+            existing_role_keys.add(_pool_role_key(
+                old_name, old_id, old.get("一级赛道", ""), old.get("二级环节", ""),
+                old.get("三级环节/定位", ""),
+            ))
 
     new_rows = []
     skipped = []
     already = 0
-    existing_updated = False
     batch_label = date_short or datetime.now().strftime("%m%d")
 
     for row in mapping_rows:
@@ -459,22 +493,15 @@ def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
         if not rep or rep == "nan":
             continue
         event_id = str(row.get("事件ID", "") or "")
-        for name in re.split(r'[、，,;；/]', rep):
-            name = name.strip()
+        sector = row.get("一级赛道", "")
+        sub2 = row.get("二级环节", "")
+        sub3 = row.get("三级零部件/材料/设备", "")
+        for name in _extract_known_companies(rep, code_dict):
             if not name or len(name) < 2:
                 continue
-            if name in existing_names:
+            role_key = _pool_role_key(name, event_id, sector, sub2, sub3)
+            if role_key in existing_role_keys:
                 already += 1
-                # 公司已在池子里，不代表这次的新事件关联不用记：只补充没出现过的事件ID，
-                # 不覆盖已有内容（同一模式见sync_sectors_status的signal_stock_code并集追加）。
-                if event_id and event_id != "nan":
-                    idx = existing.index[existing["公司名称"].astype(str) == name]
-                    for i in idx:
-                        cur = str(existing.at[i, "关联事件ID"]) if pd.notna(existing.at[i, "关联事件ID"]) else ""
-                        linked_ids = set(re.findall(r'[A-Z][A-Z0-9]+-\d{4}-\d{3}', cur))
-                        if event_id not in linked_ids:
-                            existing.at[i, "关联事件ID"] = f"{cur},{event_id}" if cur and cur != "nan" else event_id
-                            existing_updated = True
                 continue
             code = code_dict.get(name)
             if code and code.startswith(BJ_CODE_PREFIXES):
@@ -484,9 +511,9 @@ def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
                 continue
             new_rows.append({
                 "大类":         da_lei,
-                "一级赛道":     row.get("一级赛道", ""),
-                "二级环节":     row.get("二级环节", ""),
-                "三级环节/定位": row.get("三级零部件/材料/设备", ""),
+                "一级赛道":     sector,
+                "二级环节":     sub2,
+                "三级环节/定位": sub3,
                 "公司名称":     name,
                 "市场/属性":    "A股",
                 "角色":        "代表公司/公司类型",
@@ -496,15 +523,35 @@ def sync_company_pool(source="tech", mapping_rows=None, date_short=None):
                 "置信度":      "中",
                 "备注":        "",
             })
-            existing_names.add(name)  # 防止本批次内重复添加
+            existing_names.add(name)
+            existing_role_keys.add(role_key)  # 防止本批次内重复添加同一角色
 
-    if new_rows or existing_updated:
-        combined = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else existing
+    if new_rows or deduped:
+        combined = pd.concat([existing, pd.DataFrame(new_rows)], ignore_index=True)
         with pd.ExcelWriter(COMPANY_POOL, engine="openpyxl", mode="a",
                             if_sheet_exists="replace") as writer:
             combined.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    return {"added": len(new_rows), "already_exists": already, "skipped_no_code": skipped}
+    return {"added": len(new_rows), "already_exists": already,
+            "deduped": deduped, "skipped_no_code": skipped}
+
+
+def reconcile_company_pool(source="tech", sector=None):
+    """用最新mapping对账公司池，修复历史mapping未触发增量同步造成的缺口。"""
+    latest_dir = find_latest_csv_dir(source)
+    prefix = get_tables(source)["mapping"]["prefix"]
+    mapping_df, _ = load_csv(latest_dir, prefix)
+    if mapping_df is None:
+        raise FileNotFoundError(f"未找到{source} mapping表")
+    if sector:
+        mapping_df = mapping_df[
+            mapping_df["一级赛道"].astype(str).str.contains(sector, na=False)
+        ]
+    rows = mapping_df.fillna("").to_dict("records")
+    result = sync_company_pool(source, mapping_rows=rows, date_short=datetime.now().strftime("%m%d"))
+    result["mapping_rows_scanned"] = len(rows)
+    result["sector"] = sector or "全量"
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -560,8 +607,7 @@ def sync_sectors_status(mapping_rows=None, events_rows=None, date_short=None, ne
                 m = sector_matches.setdefault(sid, {"companies": set(), "event_ids": set()})
                 if event_id and event_id != "nan":
                     m["event_ids"].add(event_id)
-                for name in re.split(r'[、，,;；/]', rep):
-                    name = name.strip()
+                for name in _extract_known_companies(rep, code_dict):
                     if len(name) >= 2:
                         m["companies"].add(name)
 
@@ -1048,6 +1094,10 @@ def main():
     p_sync.add_argument("--source", choices=["tech", "nonfin"], default="tech")
     p_sync.add_argument("--changes", required=True, help="变更JSON文件路径（读取其中的mapping新增行）")
 
+    p_reconcile = sub.add_parser("reconcile-pool", help="用最新mapping全量对账并回填公司池历史缺口")
+    p_reconcile.add_argument("--source", choices=["tech", "nonfin"], default="tech")
+    p_reconcile.add_argument("--sector", help="仅对账指定一级赛道关键词；不传则全量")
+
     p_ids = sub.add_parser("next-ids", help="生成下一批ID")
     p_ids.add_argument("--source", choices=["tech", "nonfin"], default="tech")
     p_ids.add_argument("--table", required=True, help="表名（events/mapping/forward等）")
@@ -1075,6 +1125,14 @@ def main():
               f"{len(result['skipped_no_code'])}家无A股代码跳过")
         if result["skipped_no_code"]:
             print("  无代码跳过: " + "、".join(result["skipped_no_code"]))
+    elif args.cmd == "reconcile-pool":
+        result = reconcile_company_pool(args.source, sector=args.sector)
+        print(f"公司池全量对账: source={args.source}, sector={result['sector']}, "
+              f"扫描mapping {result['mapping_rows_scanned']}行, +{result['added']}条公司角色, "
+              f"{result['already_exists']}条已存在, 清理{result['deduped']}条精确重复, "
+              f"{len(result['skipped_no_code'])}条无A股代码跳过")
+        if result["skipped_no_code"]:
+            print("  无代码跳过: " + "、".join(sorted(set(result["skipped_no_code"]))))
     elif args.cmd == "next-ids":
         cmd_next_ids(args.source, args.table, args.count, args.sector, args.date)
 

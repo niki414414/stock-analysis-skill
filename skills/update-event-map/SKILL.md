@@ -215,6 +215,16 @@ python3 $UPDATER validate
 python3 $UPDATER sync-pool --source tech --changes /tmp/event_map_changes.json
 ```
 
+历史mapping或同步机制上线前的数据需要全量对账时，使用：
+```bash
+python3 $UPDATER reconcile-pool --source tech --sector {一级赛道}
+```
+
+`reconcile-pool`按“公司×事件×产业角色”回填，不再按公司名粗暴去重；同一家公司处于不同
+产业环节时会保留多行角色。代表公司字段即使写成“定位样本：A、B、C”等说明文字，也会
+优先通过`company_code_map.csv`做实体识别。每次新增一个既有大赛道的mapping后，建议运行
+该赛道对账，随后再次运行确认`+0条公司角色`，完成幂等校验。
+
 **关键链路**：事件地图更新(apply) → 公司池自动同步(sync_company_pool) → scanner/window模型自动覆盖新公司，无需额外操作
 
 ---

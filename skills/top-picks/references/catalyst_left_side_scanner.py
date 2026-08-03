@@ -244,7 +244,7 @@ def load_active_events() -> pd.DataFrame:
 def parse_event_ids(val) -> list:
     if pd.isna(val):
         return []
-    return re.findall(r'[A-Z][A-Z0-9]+-\d{4}-\d{3}', str(val))
+    return re.findall(r'[A-Z][A-Z0-9-]*-\d{4}-\d{3}', str(val))
 
 def load_company_candidates(active_events: pd.DataFrame) -> pd.DataFrame:
     """从公司.xlsx找出关联活跃事件的A股公司，解析股票代码。"""
@@ -273,27 +273,44 @@ def load_company_candidates(active_events: pd.DataFrame) -> pd.DataFrame:
         parsed = parse_event_ids(row["关联事件ID"])
         if not parsed:
             continue
-        # 取第一个能匹配上活跃事件的ID
-        matched_id = next((eid for eid in parsed if eid in active_ids), None)
-        if not matched_id:
+        matched_ids = [eid for eid in parsed if eid in active_ids]
+        if not matched_ids:
             continue
         name = str(row["公司名称"])
         code = code_dict.get(name)
         if not code:
             continue
-        rows.append({
-            "code":          code,
-            "name":          name,
-            "event_id":      matched_id,
-            "event_name":    event_name_map.get(matched_id, ""),
-            "event_status":  event_status_map.get(matched_id, ""),
-            "event_bucket":  event_bucket_map.get(matched_id, "gray"),
-            "catalyst_score": event_score_map.get(matched_id, 0),
-            "sector":        str(row.get("一级赛道", "")),
-            "sub_sector":    str(row.get("二级环节", "")),
-        })
-    
-    df = pd.DataFrame(rows).drop_duplicates(subset=["code"])
+        for matched_id in matched_ids:
+            rows.append({
+                "code":          code,
+                "name":          name,
+                "event_id":      matched_id,
+                "event_name":    event_name_map.get(matched_id, ""),
+                "event_status":  event_status_map.get(matched_id, ""),
+                "event_bucket":  event_bucket_map.get(matched_id, "gray"),
+                "catalyst_score": event_score_map.get(matched_id, 0),
+                "sector":        str(row.get("一级赛道", "")),
+                "sub_sector":    str(row.get("二级环节", "")),
+            })
+
+    if not rows:
+        return pd.DataFrame()
+
+    # 同一公司可能有多条产业角色和多项活跃催化。保留最高分催化作为主事件，
+    # 同时聚合全部命中，避免旧逻辑“取第一个事件+按代码去重”静默丢信息。
+    raw = pd.DataFrame(rows).sort_values("catalyst_score", ascending=False)
+    aggregated = []
+    for _, group in raw.groupby("code", sort=False):
+        primary = group.iloc[0].to_dict()
+        primary["event_ids"] = ";".join(dict.fromkeys(group["event_id"].astype(str)))
+        primary["event_names"] = "；".join(dict.fromkeys(group["event_name"].astype(str)))
+        primary["matched_catalyst_count"] = int(group["event_id"].nunique())
+        primary["roles"] = "；".join(dict.fromkeys(
+            (group["sector"].astype(str) + "/" + group["sub_sector"].astype(str)).tolist()
+        ))
+        aggregated.append(primary)
+
+    df = pd.DataFrame(aggregated)
     log.info(f"候选公司: {len(df)} 家")
     return df
 
