@@ -101,9 +101,11 @@ CREATE TABLE company_event_links(
   expectation_gap TEXT,
   validation_metrics TEXT,
   risk_notes TEXT,
-  evidence_grade TEXT,
-  benefit_directness INTEGER,
-  commercial_stage TEXT,
+  relation_status TEXT NOT NULL CHECK(relation_status IN ('映射已验证','已登记','待验证')),
+  benefit_tier TEXT NOT NULL CHECK(benefit_tier IN ('明确映射','角色关联','主题观察')),
+  mapping_basis TEXT NOT NULL,
+  mapping_confidence TEXT,
+  source_ref TEXT,
   last_verified TEXT,
   UNIQUE(company_id,event_pk,role_2,role_3),
   FOREIGN KEY(company_id) REFERENCES companies(company_id),
@@ -279,6 +281,15 @@ def extract_known_companies(text: Any, code_map: dict[str, str]) -> list[str]:
     return sorted(set(names), key=lambda name: (value.find(name), -len(name)))
 
 
+def pool_benefit_tier(row: pd.Series | dict) -> str:
+    """Use only explicit pool wording; never infer company-level economic directness."""
+    get = row.get
+    text = " ".join(str(get(field, "") or "") for field in (
+        "二级环节", "三级环节/定位", "备注"
+    ))
+    return "主题观察" if any(token in text for token in ("映射", "参股", "概念", "生态")) else "角色关联"
+
+
 class EventStoreBuilder:
     def __init__(self, db_path: Union[Path, str] = DEFAULT_DB):
         self.db_path = Path(db_path)
@@ -324,6 +335,23 @@ class EventStoreBuilder:
                 "nonfin_event_linked_companies": con.execute(
                     "SELECT count(DISTINCT l.company_id) FROM company_event_links l "
                     "JOIN events e USING(event_pk) WHERE e.source='nonfin'"
+                ).fetchone()[0],
+                "relationship_provenance": {
+                    f"{row[0]} / {row[1]}": row[2]
+                    for row in con.execute(
+                        """SELECT relation_status,benefit_tier,count(*)
+                           FROM company_event_links
+                           GROUP BY relation_status,benefit_tier
+                           ORDER BY relation_status,benefit_tier"""
+                    )
+                },
+                "relationships_with_source": con.execute(
+                    """SELECT count(*) FROM company_event_links
+                       WHERE coalesce(trim(source_ref),'')<>''"""
+                ).fetchone()[0],
+                "relationships_with_verified_date": con.execute(
+                    """SELECT count(*) FROM company_event_links
+                       WHERE coalesce(trim(last_verified),'')<>''"""
                 ).fetchone()[0],
             }
         finally:
@@ -404,12 +432,13 @@ class EventStoreBuilder:
                 if not company_id:
                     continue
                 con.execute(
-                    """INSERT OR IGNORE INTO company_event_links(company_id,event_pk,mapping_id,industry_1,role_2,role_3,attention,traded_status,expectation_gap,validation_metrics,risk_notes,last_verified)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    """INSERT OR IGNORE INTO company_event_links(company_id,event_pk,mapping_id,industry_1,role_2,role_3,attention,traded_status,expectation_gap,validation_metrics,risk_notes,relation_status,benefit_tier,mapping_basis,source_ref,last_verified)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (company_id, event_pk, mapping_id, r.get("一级产业", ""), r.get("二级环节", ""),
                      r.get("三级零部件/材料/设备", ""), r.get("当前市场关注度", ""),
                      r.get("是否已炒作", ""), r.get("预期差", ""), r.get("验证指标", ""),
-                     r.get("风险点", ""), r.get("最新更新时间", "")),
+                     r.get("风险点", ""), "映射已验证", "明确映射", "已验证产业mapping明确列名",
+                     r.get("来源", ""), r.get("最新更新时间", "")),
                 )
 
     def _import_tech_supporting(self, con, directory: Path):
@@ -556,11 +585,17 @@ class EventStoreBuilder:
                     event_pk = self.event_pks.get((source, eid))
                     if not event_pk:
                         continue
+                    source_parts = [
+                        value for value in (r.get("来源批次", "").strip(), r.get("备注", "").strip())
+                        if value
+                    ]
                     con.execute(
-                        """INSERT OR IGNORE INTO company_event_links(company_id,event_pk,industry_1,role_2,role_3,evidence_grade,last_verified)
-                           VALUES(?,?,?,?,?,?,?)""",
+                        """INSERT OR IGNORE INTO company_event_links(company_id,event_pk,industry_1,role_2,role_3,relation_status,benefit_tier,mapping_basis,mapping_confidence,source_ref,last_verified)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                         (company_id, event_pk, r.get("一级赛道", ""), r.get("二级环节", ""),
-                         r.get("三级环节/定位", ""), r.get("置信度", ""), ""),
+                         r.get("三级环节/定位", ""), "已登记", pool_benefit_tier(r),
+                         "公司池登记", r.get("置信度", ""), "；".join(source_parts) or "公司池",
+                         ""),
                     )
 
     def _record_file(self, path: Optional[Path]):
@@ -569,7 +604,7 @@ class EventStoreBuilder:
 
     def _write_metadata(self, con):
         values = {
-            "schema_version": "1",
+            "schema_version": "2",
             "build_mode": "shadow",
             "built_at": datetime.now(timezone.utc).isoformat(),
             "workspace_root": str(WORKSPACE_ROOT),
@@ -600,8 +635,9 @@ class EventStore:
         like = f"%{keyword}%"
         return self._query(
             """SELECT c.stock_code,c.company_name,e.source,e.sector,e.event_id,e.event_name,e.status,
-                      e.importance,e.trade_status,l.industry_1,l.role_2,l.role_3,l.evidence_grade,
-                      l.benefit_directness,l.commercial_stage,l.validation_metrics,l.risk_notes,l.last_verified
+                      e.importance,e.trade_status,l.industry_1,l.role_2,l.role_3,l.relation_status,
+                      l.benefit_tier,l.mapping_basis,l.mapping_confidence,l.source_ref,
+                      l.validation_metrics,l.risk_notes,l.last_verified
                FROM companies c JOIN company_event_links l USING(company_id) JOIN events e USING(event_pk)
                WHERE c.company_name LIKE ? OR c.stock_code LIKE ?
                ORDER BY e.importance DESC,e.last_verified DESC,e.event_id""",
@@ -612,8 +648,8 @@ class EventStore:
         like = f"%{keyword}%"
         return self._query(
             """SELECT c.stock_code,c.company_name,e.sector,e.event_id,e.event_name,e.status,e.importance,
-                      e.trade_status,l.industry_1,l.role_2,l.role_3,l.evidence_grade,l.benefit_directness,
-                      l.commercial_stage,l.validation_metrics,l.risk_notes,l.last_verified
+                      e.trade_status,l.industry_1,l.role_2,l.role_3,l.relation_status,l.benefit_tier,
+                      l.mapping_basis,l.mapping_confidence,l.source_ref,l.validation_metrics,l.risk_notes,l.last_verified
                FROM events e JOIN company_event_links l USING(event_pk) JOIN companies c USING(company_id)
                WHERE e.sector LIKE ? OR l.industry_1 LIKE ? OR l.role_2 LIKE ? OR l.role_3 LIKE ?
                ORDER BY e.importance DESC,c.company_name,e.event_id""",
@@ -624,7 +660,8 @@ class EventStore:
         return self._query(
             """SELECT e.source,e.sector,e.event_id,e.event_name,e.status,e.importance,e.trade_status,
                       e.expectation_gap,e.validation_metrics,e.notes,c.stock_code,c.company_name,
-                      l.industry_1,l.role_2,l.role_3,l.evidence_grade,l.benefit_directness,l.commercial_stage
+                      l.industry_1,l.role_2,l.role_3,l.relation_status,l.benefit_tier,
+                      l.mapping_basis,l.mapping_confidence,l.source_ref,l.last_verified
                FROM events e LEFT JOIN company_event_links l USING(event_pk) LEFT JOIN companies c USING(company_id)
                WHERE e.event_id=? ORDER BY c.company_name""",
             (event_id,),

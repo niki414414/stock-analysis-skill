@@ -22,6 +22,7 @@ python3 scripts/event_db.py compare sector AI应用
 ```
 
 迁移状态与切换边界见`memory/project-event-store-sqlite-shadow.md`。
+股票系统各层职责边界见`memory/feedback_stock_system_layer_boundary.md`。
 
 ## 目录结构
 

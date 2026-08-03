@@ -1,5 +1,6 @@
 # Memory Index
 
+- [股票系统分层边界](feedback_stock_system_layer_boundary.md) — 所有股票相关修改必须放回“材料→事件→召回→六层→决策”全链路判断；事件库不复制个股兑现和交易分析
 - [均衡市场机会发现层P0（2026-07-29）](project-balanced-opportunity-p0-20260729.md) — 大盘→板块证据→质量/催化/市场响应候选→六层入口；Tushare日期感知资金与真实验收
 - [Market Outlook 2.0（2026-07-28）](project-market-outlook-v2-20260728.md) — 异常原因核验、非科技轮动雷达、影子回测边界及已知限制
 - [P0执行记录2026-07-24](project-p0-execution-20260724.md) — 排除北交所、补齐mapping，并修复既有公司不追加事件ID的结构性问题

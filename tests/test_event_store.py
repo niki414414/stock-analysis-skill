@@ -26,8 +26,12 @@ def test_event_store_company_sector_and_event_queries(tmp_path):
     company_id = con.execute("SELECT company_id FROM companies").fetchone()[0]
     event_pk = con.execute("SELECT event_pk FROM events").fetchone()[0]
     con.execute(
-        "INSERT INTO company_event_links(company_id,event_pk,role_2,role_3,validation_metrics) VALUES(?,?,?,?,?)",
-        (company_id, event_pk, "企业软件", "工作流Agent", "ARR与付费率"),
+        """INSERT INTO company_event_links(
+               company_id,event_pk,role_2,role_3,validation_metrics,
+               relation_status,benefit_tier,mapping_basis
+           ) VALUES(?,?,?,?,?,?,?,?)""",
+        (company_id, event_pk, "企业软件", "工作流Agent", "ARR与付费率",
+         "映射已验证", "明确映射", "测试依据"),
     )
     con.commit()
     con.close()
@@ -39,6 +43,8 @@ def test_event_store_company_sector_and_event_queries(tmp_path):
 
     assert company[0]["company_name"] == "示例软件"
     assert company[0]["role_3"] == "工作流Agent"
+    assert company[0]["relation_status"] == "映射已验证"
+    assert company[0]["benefit_tier"] == "明确映射"
     assert sector[0]["event_id"] == "AI-SAAS-2026-001"
     assert event[0]["stock_code"] == "300001"
 
@@ -50,3 +56,27 @@ def test_extract_known_companies_ignores_generic_company_types():
         "金山办公", "用友网络"
     ]
     assert module.extract_known_companies("AI SaaS、企业软件厂商", code_map) == []
+
+
+def test_company_event_schema_keeps_screening_boundary(tmp_path):
+    """事件库只解释召回关系，不复制六层的公司兑现与交易判断。"""
+    module = load_store_module()
+    db = tmp_path / "event.db"
+    con = sqlite3.connect(db)
+    con.executescript(module.SCHEMA_SQL)
+    columns = {row[1] for row in con.execute("PRAGMA table_info(company_event_links)")}
+    con.close()
+
+    assert {"relation_status", "benefit_tier", "mapping_basis", "mapping_confidence",
+            "source_ref", "last_verified"} <= columns
+    assert not {"commercial_stage", "benefit_directness", "evidence_grade"} & columns
+
+
+def test_pool_benefit_tier_only_downgrades_explicit_theme_wording():
+    module = load_store_module()
+    assert module.pool_benefit_tier({
+        "二级环节": "AI大模型映射", "三级环节/定位": "参股月之暗面", "备注": ""
+    }) == "主题观察"
+    assert module.pool_benefit_tier({
+        "二级环节": "高容MLCC", "三级环节/定位": "陶瓷粉体", "备注": "客户仍待六层核验"
+    }) == "角色关联"

@@ -8,6 +8,9 @@
 核心关系粒度为：`公司 × 正式事件 × 产业角色`。申万行业只保留为公司背景，不作为事件
 选股的主要召回来源。
 
+事件库只回答“为什么召回这家公司”，不回答“这家公司现在能不能买”。公司业务占比、
+商业化兑现、利润贡献、估值和交易状态继续由六层个股分析在分析时核验。
+
 ## 当前状态
 
 - 正式影子库：`技能数据/event_map_shadow.db`
@@ -43,6 +46,10 @@ python3 repo/skills/stock-analysis/scripts/event_map_query.py sector AI应用
 - 证券主数据字典：5,529个唯一代码（用于名称/代码识别，不代表研究覆盖）
 - 已连接正式事件的公司：580家（科技531家、非科技53家，跨池有重叠）
 - Excel活跃公司池：991家去重公司；其中部分仅为候选或材料增补，尚未连接正式事件
+- 公司关系回填：320条“映射已验证/明确映射”，476条“已登记/角色关联”，
+  40条“已登记/主题观察”
+- 320条明确映射均保留来源、验证指标、风险和最后验证日期
+- 516条已登记关系均保留公司池来源，但验证日期留空，避免把“已登记”伪装成“已验证”
 - 科技+非科技正式事件：213
 - 公司—事件关系：836
 - 行业角色模板：64
@@ -55,8 +62,9 @@ python3 repo/skills/stock-analysis/scripts/event_map_query.py sector AI应用
 - 科技旧表空ID续行：sources 12、signals 15、forward 6；隔离到`import_anomalies`，未猜测合并。
 - 非科技空ID：3条。
 - 孤立mapping：`MAP-20260618-006 → MICROLED-OPT-2026-001`，未建立正式外键关系。
-- `benefit_directness / evidence_grade / commercial_stage`结构已预留，但历史mapping多数尚未回填，
-  在回填完成前不得进入正式选股评分。
+- 公司池的原“置信度”仅作为`mapping_confidence`保留，不等同证据等级。
+- `benefit_directness / evidence_grade / commercial_stage`已从事件关系表移除，防止把六层的
+  公司兑现与交易判断重复前置。
 
 ## 切换边界
 
@@ -65,7 +73,7 @@ python3 repo/skills/stock-analysis/scripts/event_map_query.py sector AI应用
 1. 连续至少三轮材料更新自动重建成功；
 2. AI应用、硬件、非科技各完成一次双读差异解释；
 3. 空ID和孤立mapping清理方案确认；
-4. 公司关系核心字段回填率达到可用标准；
+4. 公司关系的状态、受益层级、依据、来源和验证日期通过增量更新复核；
 5. stock-analysis、top-picks和market-outlook消费测试通过。
 
 切换后SQLite为唯一事实源，CSV/Excel仅由数据库导出，不再反向写入。
