@@ -312,6 +312,20 @@ class EventStoreBuilder:
             self.audit["integrity"] = integrity
             self.audit["foreign_key_errors"] = 0
             self.audit["counts"] = self._table_counts(con)
+            self.audit["coverage"] = {
+                "security_master_companies": self.audit["counts"]["companies"],
+                "event_linked_companies": con.execute(
+                    "SELECT count(DISTINCT company_id) FROM company_event_links"
+                ).fetchone()[0],
+                "tech_event_linked_companies": con.execute(
+                    "SELECT count(DISTINCT l.company_id) FROM company_event_links l "
+                    "JOIN events e USING(event_pk) WHERE e.source='tech'"
+                ).fetchone()[0],
+                "nonfin_event_linked_companies": con.execute(
+                    "SELECT count(DISTINCT l.company_id) FROM company_event_links l "
+                    "JOIN events e USING(event_pk) WHERE e.source='nonfin'"
+                ).fetchone()[0],
+            }
         finally:
             con.close()
         os.replace(temp_path, self.db_path)

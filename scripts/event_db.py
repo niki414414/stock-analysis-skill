@@ -129,7 +129,11 @@ def main():
         else:
             print(f"影子库已构建: {args.db}")
             print(f"审计报告: {args.audit_output}")
-            print(json.dumps({"counts": report["counts"], "anomalies": report["anomalies"]}, ensure_ascii=False, indent=2))
+            print(json.dumps({
+                "coverage": report["coverage"],
+                "table_counts": report["counts"],
+                "anomalies": report["anomalies"],
+            }, ensure_ascii=False, indent=2))
         return
 
     store = EventStore(args.db)
