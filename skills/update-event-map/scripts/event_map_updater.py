@@ -35,6 +35,8 @@ WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
     os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
 ))
 REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
 TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
@@ -417,6 +419,18 @@ def cmd_apply(source, date_short, label, changes_path):
             for f in sectors_summary["flagged_for_review"]:
                 print(f"    {f['sector_id']}（{f['sub_sector']}）当前stage={f['current_stage']}"
                       f" 匹配公司:{f['matched_companies']}")
+
+    # 影子期：CSV仍是写入主源，每次apply后自动重建SQLite投影。
+    # 失败只告警，不回滚已经验证过的CSV更新；切换为SQLite主库前再收紧为事务级失败。
+    try:
+        from skills.shared.event_store import build_shadow_database
+        db_audit = build_shadow_database()
+        print(f"\nSQLite影子库: ✓ 已重建 "
+              f"(events={db_audit['counts'].get('events', 0)}, "
+              f"company_event_links={db_audit['counts'].get('company_event_links', 0)}, "
+              f"anomalies={db_audit['counts'].get('import_anomalies', 0)})")
+    except Exception as exc:
+        print(f"\nSQLite影子库: ⚠️ 重建失败，不影响CSV主库: {exc}")
 
     return new_dir, summary
 

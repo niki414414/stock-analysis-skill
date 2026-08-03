@@ -19,8 +19,11 @@
 """
 import argparse
 import glob
+import json
 import os
 import re
+import sys
+from pathlib import Path
 
 import pandas as pd
 
@@ -32,6 +35,24 @@ TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
 COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
 CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+def _sqlite_store():
+    from skills.shared.event_store import EventStore
+    return EventStore()
+
+
+def _print_sqlite_rows(rows, as_json=False):
+    print("数据源: SQLite影子库")
+    if as_json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+    elif not rows:
+        print("未找到匹配记录。")
+    else:
+        print(pd.DataFrame(rows).fillna("").to_string(index=False))
 
 # 公司表一级赛道 → 事件地图一级赛道 映射字典
 # 公司表里一个赛道可能对应事件地图多个赛道（用列表），查询时逐个搜
@@ -646,6 +667,30 @@ def main():
     p_company = sub.add_parser("company", help="查公司归属赛道（输入公司名/代码/关键词）")
     p_company.add_argument("keyword", help="公司名称或关键词，如 雅克科技 / 前驱体 / 光模块")
 
+    # SQLite影子期新增命令：不改变既有company/events/mapping等CSV命令语义。
+    p_db_company = sub.add_parser("db-company", help="从SQLite查询公司产业角色与关联催化")
+    p_db_company.add_argument("keyword", help="公司名称或股票代码")
+    p_db_company.add_argument("--json", action="store_true")
+
+    p_db_sector = sub.add_parser("sector", help="从SQLite查询赛道公司及其关联催化")
+    p_db_sector.add_argument("keyword", help="赛道或细分角色关键词，如 AI应用 / Agent安全")
+    p_db_sector.add_argument("--json", action="store_true")
+
+    p_db_event = sub.add_parser("event", help="从SQLite查询事件详情及关联公司")
+    p_db_event.add_argument("event_id", help="事件ID，如 AI-SAAS-2026-001")
+    p_db_event.add_argument("--json", action="store_true")
+
+    p_db_catalysts = sub.add_parser("catalysts", help="从SQLite查询结构化前瞻催化")
+    p_db_catalysts.add_argument("--sector", help="按赛道筛选")
+    p_db_catalysts.add_argument("--json", action="store_true")
+
+    p_db_search = sub.add_parser("search", help="从SQLite跨公司、事件和产业角色搜索")
+    p_db_search.add_argument("keyword")
+    p_db_search.add_argument("--json", action="store_true")
+
+    p_db_audit = sub.add_parser("db-audit", help="查看SQLite导入异常摘要")
+    p_db_audit.add_argument("--json", action="store_true")
+
     p_pool = sub.add_parser("pool", help="导出公司池A股代码列表（JSON，供signal_scanner消费）")
     p_pool.add_argument("--sector", help="按一级赛道筛选，如 AI光通信与高速互联")
     p_pool.add_argument("--source", choices=["all", "tech", "nonfin"], default="all",
@@ -665,6 +710,23 @@ def main():
                           help="JSON输出（供scanner等脚本消费，禁止其他脚本重新计算窗口位置）")
 
     args = parser.parse_args()
+
+    if args.cmd in ("db-company", "sector", "event", "catalysts", "search", "db-audit"):
+        store = _sqlite_store()
+        if args.cmd == "db-company":
+            rows = store.company(args.keyword)
+        elif args.cmd == "sector":
+            rows = store.sector(args.keyword)
+        elif args.cmd == "event":
+            rows = store.event(args.event_id)
+        elif args.cmd == "catalysts":
+            rows = store.catalysts(args.sector)
+        elif args.cmd == "search":
+            rows = store.search(args.keyword)
+        else:
+            rows = store.anomalies()
+        _print_sqlite_rows(rows, args.json)
+        return
 
     if args.cmd == "window":
         sector = getattr(args, "sector", None)

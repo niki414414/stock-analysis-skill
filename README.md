@@ -8,6 +8,21 @@
 
 如果你是被临时拉来接手这个项目的 AI（Codex / Gemini / 其他），请先读 [HANDOFF.md](HANDOFF.md)。
 
+## 事件数据库影子模式
+
+产业事件数据当前处于SQLite影子迁移阶段：CSV仍为写入主源，更新后自动重建
+`技能数据/event_map_shadow.db`。统一查询入口为：
+
+```bash
+python3 scripts/event_db.py company 300454
+python3 scripts/event_db.py sector AI应用
+python3 scripts/event_db.py event AI-SAAS-2026-001
+python3 scripts/event_db.py catalysts --sector AI应用
+python3 scripts/event_db.py compare sector AI应用
+```
+
+迁移状态与切换边界见`memory/project-event-store-sqlite-shadow.md`。
+
 ## 目录结构
 
 ```
