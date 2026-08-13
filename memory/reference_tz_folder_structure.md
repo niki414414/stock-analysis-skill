@@ -22,6 +22,7 @@ metadata:
 - `非科技产业事件地图/`（新建，把原来散在顶层的`非科技主线产业事件地图_CSV包_*`全部挪进来，包括旧的散装xlsx快照）
 - `公司.xlsx`、`company_code_map.csv`（原来在顶层）
 - `market_daily_snapshot/`（daily_snapshot.py输出）
+- `事件地图变更包/YYYY-MM/`（需要保留审计的`event_map_changes_*.json`；临时变更仍放`/tmp`）
 - `迁移包_latest/`（原来在顶层）
 - `claude-memory-旧备份-20260608/`（原名`claude-memory`，2026-06-08的旧memory备份，早已被当前memory系统取代，仅存档不用）
 
@@ -30,3 +31,5 @@ metadata:
 **Why：** 之前非科技事件地图的版本文件夹是直接散落在`~/Desktop/tz/`顶层的（`NONFIN_DIR`常量原来就是`~/Desktop/tz`本身，用glob匹配"非科技主线产业事件地图_*"前缀），跟科技事件地图（本来就有自己的`科技产业事件/`子文件夹）不对称，是顶层混乱的主因。
 
 **How to apply：** 以后任何新脚本/技能如果要引用公司池、事件地图、迁移包、每日快照这些路径，一律指向`~/Desktop/tz/技能数据/`下面，不要再假设它们在`~/Desktop/tz/`顶层。
+
+2026-08-04补充：事件地图持久化变更包统一放入`技能数据/事件地图变更包/YYYY-MM/`；工作区根目录只保留`WORKSPACE.md`和脚本约定的用户输入`holdings.csv`。

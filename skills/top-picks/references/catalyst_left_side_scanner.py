@@ -32,6 +32,7 @@ import sys
 import time
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -226,8 +227,16 @@ def load_active_events() -> pd.DataFrame:
         window_scores = load_window_scores(source=source)
         for eid, e in window_scores.items():
             weight = BUCKET_WEIGHT.get(e["bucket"], 0.0)
-            if weight <= 0:
+            activation_pending = (
+                e.get("bucket") == "gray"
+                and bool(e.get("activation_candidate"))
+                and not e.get("confirmed_activation_date")
+            )
+            if weight <= 0 and not activation_pending:
                 continue
+            if activation_pending:
+                # Provisional only: it must pass the event-level price confirmation below.
+                weight = 0.6
             rows.append({
                 "事件ID":      eid,
                 "事件名称":     e["event_name"],
@@ -235,6 +244,9 @@ def load_active_events() -> pd.DataFrame:
                 "bucket":      e["bucket"],
                 "catalyst_score": round(e["final_score"] * weight, 1),
                 "source":      source,
+                "activation_pending": activation_pending,
+                "evidence_date": e.get("evidence_date"),
+                "evidence_matches": e.get("evidence_matches", []),
             })
 
     df = pd.DataFrame(rows)
@@ -254,7 +266,8 @@ def _aggregate_company_candidates(rows: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
     raw = pd.DataFrame(rows).sort_values("catalyst_score", ascending=False)
     aggregated = []
-    for _, group in raw.groupby("code", sort=False):
+    group_keys = ["code", "activation_pending"] if "activation_pending" in raw.columns else ["code"]
+    for _, group in raw.groupby(group_keys, sort=False, dropna=False):
         primary = group.iloc[0].to_dict()
         primary["event_ids"] = ";".join(dict.fromkeys(group["event_id"].astype(str)))
         primary["event_names"] = "；".join(dict.fromkeys(group["event_name"].astype(str)))
@@ -303,6 +316,10 @@ def _load_company_candidates_sqlite(active_events: pd.DataFrame) -> pd.DataFrame
             "benefit_tier": link.get("benefit_tier"),
             "mapping_confidence": link.get("mapping_confidence"),
             "company_source": "sqlite",
+            "source": link.get("source", "tech"),
+            "activation_pending": bool(event.get("activation_pending", False)),
+            "evidence_date": event.get("evidence_date"),
+            "evidence_matches": event.get("evidence_matches", []),
         })
     return _aggregate_company_candidates(rows)
 
@@ -356,6 +373,16 @@ def _load_company_candidates_excel(active_events: pd.DataFrame) -> pd.DataFrame:
                 "benefit_tier": "未分层",
                 "mapping_confidence": str(row.get("置信度", "")),
                 "company_source": "excel_fallback",
+                "source": str(active_events.loc[
+                    active_events["事件ID"].eq(matched_id), "source"
+                ].iloc[0]) if "source" in active_events else "tech",
+                "activation_pending": bool(active_events.loc[
+                    active_events["事件ID"].eq(matched_id), "activation_pending"
+                ].iloc[0]) if "activation_pending" in active_events else False,
+                "evidence_date": active_events.loc[
+                    active_events["事件ID"].eq(matched_id), "evidence_date"
+                ].iloc[0] if "evidence_date" in active_events else None,
+                "evidence_matches": [],
             })
 
     return _aggregate_company_candidates(rows)
@@ -489,6 +516,8 @@ def analyze_price_freshness(bars: list) -> dict:
     # 近30日涨幅
     close_30d_ago = closes[-30] if len(closes) >= 30 else closes[0]
     pct_30d = (close - close_30d_ago) / close_30d_ago * 100 if close_30d_ago > 0 else 0
+    ret5 = (close / closes[-6] - 1) * 100 if len(closes) >= 6 and closes[-6] else 0
+    recent_limit = any(float(bar.get("pct_chg", 0)) >= 9.5 for bar in bars[-10:])
 
     # 距60日高点
     high_60d = max(b["high"] for b in bars[-60:]) if len(bars) >= 60 else max(b["high"] for b in bars)
@@ -523,6 +552,8 @@ def analyze_price_freshness(bars: list) -> dict:
         "ma20":           round(ma20, 2),
         "ma60":           round(ma60, 2),
         "pct_30d":        round(pct_30d, 1),
+        "return_5d_pct":  round(ret5, 1),
+        "recent_limit_up": recent_limit,
         "high_60d":       round(high_60d, 2),
         "dist_60d_high":  round(dist_60d_high, 1),
         "vol_ratio":      round(vol_ratio, 2),
@@ -536,6 +567,200 @@ def analyze_price_freshness(bars: list) -> dict:
         "lr_detail":      lr_detail,
     }
 
+
+def compute_sector_repair(candidates: pd.DataFrame, price_map: dict) -> dict:
+    """用事件关联公司篮子估算板块修复，避免把单一个股反弹当成板块确认。
+
+    这是关联公司篮子代理，不等同申万全行业指数。样本少于3家时只给
+    insufficient_sample，不据此否决催化候选。
+    """
+    result = {}
+    for sector, group in candidates.groupby("sector", dropna=False):
+        members = []
+        for code in group["code"].drop_duplicates():
+            bars = price_map.get(code, [])
+            if len(bars) < 10:
+                continue
+            closes = [bar["close"] for bar in bars]
+            latest = closes[-1]
+            ma5 = _mean(closes[-5:])
+            ma10 = _mean(closes[-10:])
+            ret5 = (latest / closes[-6] - 1) * 100 if closes[-6] else 0
+            recent_limit = any(float(bar.get("pct_chg", 0)) >= 9.5 for bar in bars[-10:])
+            members.append({
+                "above_ma5": latest > ma5, "above_ma10": latest > ma10,
+                "ret5": ret5, "recent_limit": recent_limit,
+            })
+        n = len(members)
+        if not n:
+            result[sector] = {"state": "no_data", "sample_size": 0}
+            continue
+        above5 = sum(item["above_ma5"] for item in members) / n
+        above10 = sum(item["above_ma10"] for item in members) / n
+        positive5 = sum(item["ret5"] > 0 for item in members) / n
+        limit_count = sum(item["recent_limit"] for item in members)
+        median5 = float(pd.Series([item["ret5"] for item in members]).median())
+        if n < 3:
+            state = "insufficient_sample"
+        elif limit_count >= 1 and above5 >= 0.5 and positive5 >= 0.5 and median5 > 0:
+            state = "confirmed"
+        elif (limit_count >= 1 and above5 >= 1 / 3) or (above5 >= 0.5 and median5 > 0):
+            state = "early_repair"
+        else:
+            state = "unconfirmed"
+        result[sector] = {
+            "state": state, "sample_size": n,
+            "above_ma5_ratio": round(above5, 3), "above_ma10_ratio": round(above10, 3),
+            "positive_5d_ratio": round(positive5, 3),
+            "median_return_5d_pct": round(median5, 2),
+            "limit_up_members_10d": int(limit_count),
+        }
+    return result
+
+
+def attach_sector_repair(results: pd.DataFrame, repair_map: dict) -> pd.DataFrame:
+    if results.empty:
+        return results
+    frame = results.copy()
+    frame["sector_repair"] = frame["sector"].map(
+        lambda value: repair_map.get(value, {"state": "no_data", "sample_size": 0})
+    )
+    frame["sector_repair_state"] = frame["sector_repair"].map(lambda value: value["state"])
+    frame["market_response_state"] = frame.apply(classify_market_response, axis=1)
+    frame["six_layer_action"] = frame["market_response_state"].map({
+        "confirmed": "优先进入六层：核验直接受益、定价程度与买点",
+        "early": "进入六层观察队列：市场刚响应，等待板块扩散或个股承接",
+        "unconfirmed": "暂不做买入分析：保留事件跟踪，等待市场响应",
+        "insufficient_data": "样本不足：可进入六层核验，但不得声称板块已确认",
+    })
+    return frame
+
+
+def classify_market_response(row: pd.Series) -> str:
+    """把事件后的价格反应翻译成状态，不再叠加一个伪精确分数。"""
+    repair = row.get("sector_repair") or {}
+    state = repair.get("state", "no_data")
+    if state == "confirmed" and row.get("lr_label") in {"就绪", "预热"}:
+        return "confirmed"
+    if state in {"confirmed", "early_repair"}:
+        return "early"
+    if state in {"no_data", "insufficient_sample"}:
+        return "insufficient_data"
+    return "unconfirmed"
+
+
+def compute_event_reactivation(candidates: pd.DataFrame, price_map: dict) -> dict:
+    """Confirm dormant-event reactivation from its mapped-company basket.
+
+    Multi-company events require breadth plus limit/volume evidence. Small baskets require
+    a directly mapped company, preventing a single thematic edge stock from resetting time.
+    """
+    result = {}
+    if candidates.empty or "activation_pending" not in candidates.columns:
+        return result
+    pending = candidates[candidates["activation_pending"].fillna(False).astype(bool)]
+    for event_id, group in pending.groupby("event_id", dropna=False):
+        members = []
+        for _, row in group.drop_duplicates("code").iterrows():
+            bars = price_map.get(row["code"], [])
+            if len(bars) < 20:
+                continue
+            closes = [bar["close"] for bar in bars]
+            vols = [bar.get("vol", 0) for bar in bars]
+            latest = closes[-1]
+            ma20 = _mean(closes[-20:])
+            ret5 = (latest / closes[-6] - 1) * 100 if closes[-6] else 0
+            vol20 = _mean(vols[-20:])
+            vol3 = _mean(vols[-3:])
+            members.append({
+                "code": row["code"], "direct": row.get("benefit_tier") == "明确映射",
+                "above_ma20": latest > ma20, "ret5": ret5,
+                "recent_limit": any(float(bar.get("pct_chg", 0)) >= 9.5 for bar in bars[-10:]),
+                "vol_ratio": vol3 / vol20 if vol20 else 0,
+            })
+        n = len(members)
+        if not n:
+            result[event_id] = {"confirmed": False, "state": "no_data", "sample_size": 0}
+            continue
+        above20 = sum(m["above_ma20"] for m in members) / n
+        positive5 = sum(m["ret5"] > 0 for m in members) / n
+        median5 = float(pd.Series([m["ret5"] for m in members]).median())
+        limit_count = sum(m["recent_limit"] for m in members)
+        direct_strong = any(
+            m["direct"] and m["above_ma20"] and m["ret5"] >= 5
+            and m["ret5"] <= 20
+            and (m["recent_limit"] or m["vol_ratio"] >= 1.2)
+            for m in members
+        )
+        if n >= 3:
+            breadth_confirmed = (
+                above20 >= 1 / 3 and positive5 >= 0.5 and median5 > 0
+                and (limit_count >= 1 or direct_strong)
+            )
+            narrow_core_confirmed = (
+                direct_strong and positive5 >= 1 / 3 and limit_count >= 1 and median5 > -3
+            )
+            confirmed = (breadth_confirmed or narrow_core_confirmed) and median5 <= 15
+        else:
+            confirmed = direct_strong and median5 <= 15
+        result[event_id] = {
+            "confirmed": bool(confirmed),
+            "state": "confirmed" if confirmed else "unconfirmed",
+            "sample_size": n, "above_ma20_ratio": round(above20, 3),
+            "positive_5d_ratio": round(positive5, 3),
+            "median_return_5d_pct": round(median5, 2),
+            "limit_up_members_10d": int(limit_count),
+            "direct_strong": bool(direct_strong),
+        }
+    return result
+
+
+def apply_event_reactivation(candidates: pd.DataFrame, price_map: dict, trade_date: str) -> pd.DataFrame:
+    """Drop unconfirmed dormant events, persist confirmed ones, and mark current-run rows."""
+    if candidates.empty or "activation_pending" not in candidates:
+        return candidates
+    checks = compute_event_reactivation(candidates, price_map)
+    audit_dir = Path(DATA_ROOT) / "market_daily_snapshot"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_rows = []
+    pending_events = candidates[candidates["activation_pending"].fillna(False).astype(bool)]
+    for event_id, group in pending_events.groupby("event_id", dropna=False):
+        audit_rows.append({
+            "trade_date": trade_date, "event_id": event_id,
+            "event_name": str(group.iloc[0].get("event_name", "")),
+            "evidence_date": group.iloc[0].get("evidence_date"),
+            "evidence_matches": group.iloc[0].get("evidence_matches", []),
+            "price_confirmation": checks.get(event_id, {"confirmed": False, "state": "no_data"}),
+        })
+    (audit_dir / f"catalyst_activation_audit_{trade_date}.json").write_text(
+        json.dumps(audit_rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    keep = []
+    from skills.shared.catalyst_activation import record_activation
+    activation_iso = datetime.strptime(trade_date, "%Y%m%d").date().isoformat()
+    for _, row in candidates.iterrows():
+        if not bool(row.get("activation_pending", False)):
+            keep.append(row.to_dict())
+            continue
+        check = checks.get(row["event_id"], {"confirmed": False})
+        if not check.get("confirmed"):
+            continue
+        record_activation({
+            "source": row.get("source", "tech"), "event_id": row["event_id"],
+            "activation_date": activation_iso, "status": "confirmed",
+            "activation_type": "evidence_plus_price",
+            "evidence_date": row.get("evidence_date"),
+            "evidence_matches": row.get("evidence_matches", []),
+            "price_confirmation": check,
+        })
+        data = row.to_dict()
+        data["event_bucket"] = "yellow"
+        data["event_status"] = "证据升级＋价格确认，再激活窗口"
+        data["activation_pending"] = False
+        data["reactivated_now"] = True
+        keep.append(data)
+    return pd.DataFrame(keep)
+
 # ── Step 4: 合并评分 ──────────────────────────────────────────────────────────
 def score_candidates(candidates: pd.DataFrame, price_map: dict) -> pd.DataFrame:
     rows = []
@@ -543,7 +768,15 @@ def score_candidates(candidates: pd.DataFrame, price_map: dict) -> pd.DataFrame:
         code = row["code"]
         bars = price_map.get(code, [])
         price = analyze_price_freshness(bars)
-        if price is None or not price["passes"]:
+        if price is None:
+            continue
+        reactivated_price_pass = (
+            bool(row.get("reactivated_now", False)) and price["close"] > price["ma20"]
+            and price["return_5d_pct"] > 3
+            and (price["recent_limit_up"] or price["vol_ratio"] >= 1.2)
+            and price["not_at_peak"] and price["pct_30d"] < 30
+        )
+        if not price["passes"] and not reactivated_price_pass:
             continue
         
         final_score = row["catalyst_score"] * price["freshness"]
@@ -674,12 +907,15 @@ def main():
     parser.add_argument("--top",              type=int,   default=20,  help="输出前N个")
     parser.add_argument("--min-event-score",  type=int,   default=3,   help="最低催化分（window模型final_score×bucket权重后的值）")
     parser.add_argument("--json",             action="store_true",      help="JSON输出")
+    parser.add_argument("--reactivation-only", action="store_true",
+                        help="仅检查休眠事件的证据+价格再激活，不运行完整波段候选扫描")
+    parser.add_argument("--as-of", help="YYYYMMDD，仅用于历史回放；默认最近已收盘交易日")
     parser.add_argument("--company-source",   choices=("sqlite", "excel"), default="sqlite",
                         help="公司关系来源；默认SQLite，excel仅用于紧急回退/双读验收")
     args = parser.parse_args()
 
     pro = _get_pro()
-    trade_date = resolve_trade_date(pro)
+    trade_date = args.as_of or resolve_trade_date(pro)
     log.info(f"=== 催化左侧扫描 trade_date={trade_date} ===")
 
     # Step 0b: 板块轮动雷达（非JSON模式自动输出）
@@ -688,7 +924,10 @@ def main():
 
     # Step 1: 活跃事件（唯一权威来源=window模型，见load_window_scores）
     active_events = load_active_events()
-    active_events = active_events[active_events["catalyst_score"] >= args.min_event_score]
+    active_events = active_events[
+        (active_events["catalyst_score"] >= args.min_event_score)
+        | active_events["activation_pending"].fillna(False).astype(bool)
+    ]
     log.info(f"催化分≥{args.min_event_score} 的事件: {len(active_events)} 个")
 
     # Step 2: 公司映射
@@ -697,12 +936,35 @@ def main():
         print("无候选公司")
         return
 
-    # Step 3: 价格数据
-    codes = candidates["code"].tolist()
-    price_map = fetch_price_batch(pro, codes, trade_date, n_days=65)
+    # Step 3a: reactivation pre-pass only fetches dormant-event companies. This keeps
+    # daily P0 monitoring lightweight even when the full active universe is large.
+    pending_mask = candidates["activation_pending"].fillna(False).astype(bool)
+    pending_candidates = candidates[pending_mask].copy()
+    regular_candidates = candidates[~pending_mask].copy()
+    pending_codes = pending_candidates["code"].drop_duplicates().tolist()
+    price_map = fetch_price_batch(pro, pending_codes, trade_date, n_days=65) if pending_codes else {}
+    confirmed_pending = apply_event_reactivation(pending_candidates, price_map, trade_date)
+    if args.reactivation_only:
+        payload = {
+            "trade_date": trade_date,
+            "pending_events": int(pending_candidates["event_id"].nunique()) if not pending_candidates.empty else 0,
+            "pending_companies": int(len(pending_codes)),
+            "confirmed_events": sorted(confirmed_pending["event_id"].drop_duplicates().tolist()) if not confirmed_pending.empty else [],
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    # Step 3b: the normal swing scan then fetches only the regular active universe.
+    regular_codes = regular_candidates["code"].drop_duplicates().tolist()
+    price_map.update(fetch_price_batch(pro, regular_codes, trade_date, n_days=65))
+    candidates = pd.concat([regular_candidates, confirmed_pending], ignore_index=True)
+    if candidates.empty:
+        print("无候选公司")
+        return
 
     # Step 4: 评分过滤
     results = score_candidates(candidates, price_map)
+    results = attach_sector_repair(results, compute_sector_repair(candidates, price_map))
     log.info(f"通过价格筛选: {len(results)} 家")
 
     # Step 4b: 前瞻记录（全部通过价格筛选的候选都记，不只是展示的top N）

@@ -83,7 +83,8 @@ for _company_sector, _event_sectors in SECTOR_MAP.items():
 # ── 科技版列定义 ─────────────────────────────────────────────────
 EVENT_COLS = [
     "事件ID", "一级赛道", "二级事件", "事件名称", "事件时间", "当前状态",
-    "重要程度", "是否已被交易", "是否存在预期差", "主要影响方向", "后续观察指标", "备注",
+    "重要程度", "是否已被交易", "是否存在预期差", "主要影响方向", "后续观察指标",
+    "最新更新时间", "信息来源类型", "来源URL", "备注",
 ]
 MAPPING_COLS = [
     "事件ID", "事件名称", "一级赛道", "一级产业", "二级环节",
@@ -552,6 +553,13 @@ def compute_scored_events(source="tech", sector=None):
 
     company_index = _build_event_company_index()
 
+    activation_dates = {}
+    try:
+        from skills.shared.catalyst_activation import confirmed_activation_dates
+        activation_dates = confirmed_activation_dates()
+    except Exception:
+        pass
+
     # 双时钟：构建 event_id → 最新corrections日期 的索引
     correction_dates: dict = {}
     try:
@@ -586,6 +594,11 @@ def compute_scored_events(source="tech", sector=None):
             expectation_gap=str(row.get("是否存在预期差", "")),
             today=today,
             latest_correction_date=correction_dates.get(event_id),
+            latest_update=str(row.get("最新更新时间", "")),
+            evidence_text=" ".join(str(row.get(field, "")) for field in (
+                "事件名称", "当前状态", "后续观察指标", "备注", "信息来源类型"
+            )),
+            confirmed_activation_date=activation_dates.get((source, event_id)),
         )
         result['companies'] = company_index.get(event_id, [])
         result['bucket'] = classify_bucket(result)
@@ -625,6 +638,11 @@ def query_window_json(source="tech", top=300, sector=None):
             "event_name":   e["event_name"],
             "catalyst_type": e.get("catalyst_type"),
             "event_date":   edate.isoformat() if edate else None,
+            "effective_date": e.get("effective_date").isoformat() if e.get("effective_date") else None,
+            "confirmed_activation_date": e.get("confirmed_activation_date").isoformat() if e.get("confirmed_activation_date") else None,
+            "activation_candidate": e.get("activation_candidate", False),
+            "evidence_date": e.get("evidence_date").isoformat() if e.get("evidence_date") else None,
+            "evidence_matches": e.get("evidence_matches", []),
             "bucket":       e.get("bucket", "gray"),
             "urgency":      e.get("urgency", 0),
             "final_score":  e.get("final_score", 0),

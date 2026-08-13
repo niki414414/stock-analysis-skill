@@ -743,17 +743,38 @@ def record_shadow_update_cycle(
         history = json.loads(path.read_text(encoding="utf-8"))
     else:
         history = {"schema_version": 1, "required_unique_cycles": 3, "cycles": []}
-    if not any(row.get("input_fingerprint") == fingerprint for row in history["cycles"]):
-        history["cycles"].append({
+    context = context or {}
+    material_cycle_id = context.get("material_cycle_id")
+    if not material_cycle_id and context.get("date_short") and context.get("label"):
+        material_cycle_id = f"{context['date_short']}:{context['label']}"
+
+    cycle_row = {
             "recorded_at": datetime.now(timezone.utc).isoformat(),
             "input_fingerprint": fingerprint,
-            "context": context or {},
+            "material_cycle_id": material_cycle_id,
+            "context": context,
             "sources": audit.get("sources", {}),
             "counts": audit.get("counts", {}),
             "coverage": audit.get("coverage", {}),
             "integrity": audit.get("integrity"),
             "foreign_key_errors": audit.get("foreign_key_errors"),
-        })
+    }
+    same_material = next(
+        (row for row in history["cycles"]
+         if material_cycle_id and row.get("material_cycle_id") == material_cycle_id),
+        None,
+    )
+    if same_material is not None:
+        # One research-material batch can update tech and non-financial CSVs in
+        # separate apply calls. Keep one observation cycle and replace it with
+        # the final combined snapshot instead of falsely counting two rounds.
+        recorded_at = same_material.get("recorded_at", cycle_row["recorded_at"])
+        same_material.clear()
+        same_material.update(cycle_row)
+        same_material["recorded_at"] = recorded_at
+        same_material["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+    elif not any(row.get("input_fingerprint") == fingerprint for row in history["cycles"]):
+        history["cycles"].append(cycle_row)
     history["completed_unique_cycles"] = len(history["cycles"])
     history["remaining_cycles"] = max(
         0, history["required_unique_cycles"] - history["completed_unique_cycles"]

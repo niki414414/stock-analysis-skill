@@ -15,6 +15,40 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Optional, Tuple
 
+
+STRONG_EVIDENCE_KEYWORDS = (
+    "重大合同", "长期供货", "供货协议", "正式合同", "订单", "中标",
+    "业绩预告", "财报", "批量交付", "正式投产", "客户认证", "涨价函",
+    "公告实施", "正式发布", "获得许可",
+)
+WEAK_OR_REPLAY_KEYWORDS = ("传闻", "转述", "尚缺原始", "待核验", "小作文", "未证实")
+
+
+def qualify_evidence_activation(
+    latest_update: str,
+    evidence_text: str,
+    today: Optional[date] = None,
+    max_age_days: int = 14,
+) -> dict:
+    """Identify a recent high-grade evidence upgrade; price confirmation happens later."""
+    today = today or date.today()
+    update_date = parse_event_date(latest_update)
+    text = str(evidence_text or "")
+    strong = [token for token in STRONG_EVIDENCE_KEYWORDS if token in text]
+    weak = [token for token in WEAK_OR_REPLAY_KEYWORDS if token in text]
+    age = (today - update_date).days if update_date else None
+    eligible = bool(update_date and strong and age is not None and 0 <= age <= max_age_days)
+    # Weak wording does not veto a separately disclosed formal contract/order.
+    if weak and not any(token in text for token in ("重大合同", "正式合同", "供货协议", "业绩预告", "正式发布")):
+        eligible = False
+    return {
+        "eligible": eligible,
+        "evidence_date": update_date,
+        "evidence_age_days": age,
+        "strong_matches": strong,
+        "weak_matches": weak,
+    }
+
 # ── 校准参数（基于reviews.csv实证数据）──────────────────────────────────
 CATALYST_TYPES = {
     "A": {
@@ -311,6 +345,9 @@ def score_event(
     expectation_gap: str,
     today: Optional[date] = None,
     latest_correction_date: Optional[date] = None,
+    latest_update: str = "",
+    evidence_text: str = "",
+    confirmed_activation_date: Optional[date] = None,
 ) -> dict:
     """对单个事件打分，返回完整窗口评估结果。
 
@@ -344,7 +381,11 @@ def score_event(
             "note": "事件时间无法解析",
         }
 
-    pos = compute_window_position(edate, ctype, today, escalation_date=latest_correction_date)
+    evidence = qualify_evidence_activation(latest_update, evidence_text, today=today)
+    effective_date = edate
+    if confirmed_activation_date and confirmed_activation_date > edate:
+        effective_date = confirmed_activation_date
+    pos = compute_window_position(effective_date, ctype, today, escalation_date=latest_correction_date)
     final_score = (imp_score + gap_bonus) * (pos["urgency"] / 10 + 0.5)
 
     return {
@@ -352,6 +393,12 @@ def score_event(
         "event_name": event_name[:50],
         "catalyst_type": ctype,
         "event_date": edate,
+        "effective_date": effective_date,
+        "confirmed_activation_date": confirmed_activation_date,
+        "activation_candidate": evidence["eligible"] and confirmed_activation_date is None,
+        "evidence_date": evidence["evidence_date"],
+        "evidence_age_days": evidence["evidence_age_days"],
+        "evidence_matches": evidence["strong_matches"],
         "position": pos,
         "base_score": imp_score + gap_bonus,
         "final_score": round(final_score, 1),

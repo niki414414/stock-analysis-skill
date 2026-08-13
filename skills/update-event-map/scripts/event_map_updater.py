@@ -330,15 +330,84 @@ def _autofill_ids(tname, tdef, existing_df, new_df, date_short):
     return new_df
 
 
+def _validate_addition_ids(source, additions):
+    """Reject explicit primary-key collisions before creating a new version."""
+    csv_dir = find_latest_csv_dir(source)
+    tables = get_tables(source)
+    errors = []
+    for tname, new_rows in additions.items():
+        if not new_rows or tname not in tables:
+            continue
+        tdef = tables[tname]
+        id_col = tdef.get("id_col")
+        if not id_col:
+            continue
+        current, _ = load_csv(csv_dir, tdef["prefix"])
+        existing_ids = set()
+        if current is not None and id_col in current.columns:
+            existing_ids = {
+                str(v).strip() for v in current[id_col].dropna()
+                if str(v).strip()
+            }
+        incoming = [
+            str(row.get(id_col, "")).strip() for row in new_rows
+            if str(row.get(id_col, "")).strip()
+        ]
+        duplicate_in_batch = sorted({value for value in incoming if incoming.count(value) > 1})
+        colliding_existing = sorted(set(incoming) & existing_ids)
+        if duplicate_in_batch:
+            errors.append(f"{tname}.{id_col}批次内重复: {duplicate_in_batch[:5]}")
+        if colliding_existing:
+            errors.append(f"{tname}.{id_col}与主库冲突: {colliding_existing[:5]}")
+    if errors:
+        raise ValueError("新增主键预检失败；未创建新版本：" + "；".join(errors))
+
+
+def _apply_deletions(df, tname, tdef, deletion_list):
+    """Apply auditable row deletions by primary key or an explicit multi-column match.
+
+    Each deletion must provide either ``id_value`` (for tables with an id_col) or
+    ``match`` (a mapping of existing columns to exact values).  An empty or invalid
+    selector is rejected so a malformed correction package cannot erase a table.
+    """
+    deleted = 0
+    for deletion in deletion_list:
+        selector = deletion.get("match") or {}
+        id_col = tdef.get("id_col")
+        if deletion.get("id_value") is not None and id_col:
+            selector = {id_col: deletion["id_value"]}
+        if not selector:
+            raise ValueError(f"{tname} deletion缺少id_value或match")
+        unknown = sorted(set(selector) - set(df.columns))
+        if unknown:
+            raise ValueError(f"{tname} deletion包含未知列: {unknown}")
+
+        mask = pd.Series(True, index=df.index)
+        for col, value in selector.items():
+            if value is None or str(value).strip() == "":
+                mask &= df[col].isna() | (df[col].astype(str).str.strip() == "")
+            else:
+                mask &= df[col].astype(str).str.strip() == str(value).strip()
+        count = int(mask.sum())
+        if count == 0:
+            print(f"  警告: {tname} 中未找到 deletion selector={selector}")
+            continue
+        df = df.loc[~mask].reset_index(drop=True)
+        deleted += count
+    return df, deleted
+
+
 def cmd_apply(source, date_short, label, changes_path):
     with open(changes_path, encoding="utf-8") as f:
         changes = json.load(f)
+
+    additions = changes.get("additions", {})
+    _validate_addition_ids(source, additions)
 
     new_dir = create_new_version(source, date_short, label)
     tables = get_tables(source)
     summary = {}
 
-    additions = changes.get("additions", {})
     for tname, new_rows in additions.items():
         if not new_rows or tname not in tables:
             continue
@@ -357,7 +426,7 @@ def cmd_apply(source, date_short, label, changes_path):
 
         df = pd.concat([df, new_df], ignore_index=True)
         df.to_csv(fpath, index=False, encoding="utf-8-sig")
-        summary[tname] = summary.get(tname, {"added": 0, "updated": 0})
+        summary[tname] = summary.get(tname, {"added": 0, "updated": 0, "deleted": 0})
         summary[tname]["added"] += len(new_rows)
 
     updates = changes.get("updates", {})
@@ -383,14 +452,30 @@ def cmd_apply(source, date_short, label, changes_path):
             for col, val in fields.items():
                 if col in df.columns:
                     df.loc[mask, col] = val
-            summary[tname] = summary.get(tname, {"added": 0, "updated": 0})
+            summary[tname] = summary.get(tname, {"added": 0, "updated": 0, "deleted": 0})
             summary[tname]["updated"] += 1
 
         df.to_csv(fpath, index=False, encoding="utf-8-sig")
 
+    deletions = changes.get("deletions", {})
+    for tname, deletion_list in deletions.items():
+        if not deletion_list or tname not in tables:
+            continue
+        tdef = tables[tname]
+        df, fpath = load_csv(new_dir, tdef["prefix"])
+        if df is None:
+            print(f"  警告: {tname} 表不存在，跳过deletion操作")
+            continue
+        df, deleted = _apply_deletions(df, tname, tdef, deletion_list)
+        if deleted:
+            df.to_csv(fpath, index=False, encoding="utf-8-sig")
+            summary[tname] = summary.get(tname, {"added": 0, "updated": 0, "deleted": 0})
+            summary[tname]["deleted"] += deleted
+
     print(f"\n变更已应用到: {new_dir}")
     for tname, s in summary.items():
-        print(f"  {tname}: +{s['added']}新增, ~{s['updated']}更新")
+        print(f"  {tname}: +{s.get('added', 0)}新增, ~{s.get('updated', 0)}更新, "
+              f"-{s.get('deleted', 0)}删除")
 
     # 公司池同步：不再是SKILL.md里"记得手动做"的一步，apply时自动跑。
     pool_summary = sync_company_pool(source, mapping_rows=additions.get("mapping"), date_short=date_short)

@@ -3,6 +3,8 @@ import sqlite3
 import json
 from pathlib import Path
 
+import pandas as pd
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,6 +15,49 @@ def load_store_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_updater_module():
+    path = ROOT / "skills/update-event-map/scripts/event_map_updater.py"
+    spec = importlib.util.spec_from_file_location("event_map_updater_delete_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_event_map_deletions_support_id_and_blank_field_match():
+    module = load_updater_module()
+    df = pd.DataFrame([
+        {"映射ID": "MAP-001", "事件ID": "EVT-001", "备注": "formal"},
+        {"映射ID": "", "事件ID": "", "备注": "legacy fragment"},
+        {"映射ID": "MAP-002", "事件ID": "EVT-002", "备注": "keep"},
+    ])
+    cleaned, deleted = module._apply_deletions(
+        df,
+        "mapping",
+        {"id_col": "映射ID"},
+        [
+            {"id_value": "MAP-001", "reason": "orphan relation"},
+            {"match": {"映射ID": "", "事件ID": "", "备注": "legacy fragment"},
+             "reason": "stale fragment"},
+        ],
+    )
+
+    assert deleted == 2
+    assert cleaned.to_dict("records") == [
+        {"映射ID": "MAP-002", "事件ID": "EVT-002", "备注": "keep"}
+    ]
+
+
+def test_event_map_deletion_rejects_empty_selector():
+    module = load_updater_module()
+    df = pd.DataFrame([{"事件ID": "EVT-001"}])
+    try:
+        module._apply_deletions(df, "events", {"id_col": "事件ID"}, [{}])
+    except ValueError as exc:
+        assert "缺少id_value或match" in str(exc)
+    else:
+        raise AssertionError("empty deletion selector must be rejected")
 
 
 def test_event_store_company_sector_and_event_queries(tmp_path):
@@ -105,3 +150,26 @@ def test_migration_cycle_counts_only_unique_validated_snapshots(tmp_path):
     assert duplicate["completed_unique_cycles"] == 1
     assert second["completed_unique_cycles"] == 2
     assert json.loads(history_path.read_text())["remaining_cycles"] == 1
+
+
+def test_migration_cycle_merges_two_sources_from_same_material_batch(tmp_path):
+    module = load_store_module()
+    history_path = tmp_path / "history.json"
+    audit = {
+        "integrity": "ok", "foreign_key_errors": 0,
+        "input_files": {"tech.csv": "hash-a"},
+        "sources": {"tech": "csv0804", "nonfin": "csv0730"},
+        "counts": {"events": 1}, "coverage": {},
+    }
+    context = {"date_short": "0804", "label": "0803_material_verified"}
+    first = module.record_shadow_update_cycle(audit, {**context, "source": "tech"}, history_path)
+    audit["input_files"]["nonfin.csv"] = "hash-b"
+    audit["sources"]["nonfin"] = "csv0804"
+    second = module.record_shadow_update_cycle(audit, {**context, "source": "nonfin"}, history_path)
+
+    assert first["completed_unique_cycles"] == 1
+    assert second["completed_unique_cycles"] == 1
+    saved = json.loads(history_path.read_text())
+    assert len(saved["cycles"]) == 1
+    assert saved["cycles"][0]["sources"]["nonfin"] == "csv0804"
+    assert "last_updated_at" in saved["cycles"][0]

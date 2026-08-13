@@ -31,6 +31,7 @@ DATA_TARGETS = [
     Path("研究材料"),
     Path("研究报告"),
     Path("分析记录"),
+    Path("交易规则"),
     Path("技能数据/company_code_map.csv"),
     Path("技能数据/公司.xlsx"),
     Path("技能数据/event_map_shadow.db"),
@@ -38,6 +39,7 @@ DATA_TARGETS = [
     Path("技能数据/event_db_migration_history.json"),
     Path("技能数据/科技产业事件"),
     Path("技能数据/非科技产业事件地图"),
+    Path("技能数据/事件地图变更包"),
     Path("技能数据/market_daily_snapshot"),
 ]
 
