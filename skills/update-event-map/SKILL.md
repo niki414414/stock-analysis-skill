@@ -190,11 +190,14 @@ python3 $UPDATER next-ids --table signals_early --count {N}
 }
 ```
 
-2. 执行写入：
+2. 执行写入（SQLite主库启用后唯一合法入口）：
 
 ```bash
-python3 $UPDATER apply --source tech --date {MMDD} --label {label} --changes /tmp/event_map_changes.json
+python3 repo/scripts/event_db_cutover.py apply --source tech --changes /tmp/event_map_changes.json
 ```
+
+旧`event_map_updater.py apply`只用于SQLite切换前的历史流程；检测到
+`metadata.build_mode=sqlite_primary`后会主动拒绝CSV写入，禁止形成双主。
 
 3. 验证：
 
@@ -232,9 +235,11 @@ python3 $UPDATER reconcile-pool --source tech --sector {一级赛道}
 ## STEP 6: 导出Excel + 统一备份（每次实质性更新后执行）
 
 ```bash
-# Excel导出
-python3 $UPDATER export-excel --source tech \
-  --output "$TZ_CODEX_HOME/技能数据/科技产业事件/{MMDD}.xlsx"
+# SQLite直接导出兼容CSV和Excel；导出物只读，不得反向编辑入库
+python3 repo/scripts/event_db_cutover.py export-csv \
+  --date {YYYYMMDD} --output-root "$TZ_CODEX_HOME/技能数据/事件地图导出/{YYYYMMDD}_sqlite_primary"
+python3 repo/scripts/event_db_cutover.py export-excel --source tech \
+  --output "$TZ_CODEX_HOME/技能数据/事件地图导出/{YYYYMMDD}_sqlite_primary/{MMDD}_sqlite_primary.xlsx"
 
 # 数据与代码校验通过后，在 repo 中提交并推送。
 # 然后生成统一离线包（Git bundle + 活动数据 + SHA-256）。

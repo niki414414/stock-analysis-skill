@@ -40,6 +40,7 @@ DATA_TARGETS = [
     Path("技能数据/科技产业事件"),
     Path("技能数据/非科技产业事件地图"),
     Path("技能数据/事件地图变更包"),
+    Path("技能数据/事件地图导出"),
     Path("技能数据/market_daily_snapshot"),
 ]
 

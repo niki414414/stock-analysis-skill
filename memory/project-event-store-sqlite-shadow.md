@@ -129,3 +129,16 @@ python3 repo/skills/stock-analysis/scripts/event_map_query.py sector AI应用
 5. stock-analysis、top-picks和market-outlook消费测试通过。
 
 切换后SQLite为唯一事实源，CSV/Excel仅由数据库导出，不再反向写入。
+
+## 正式切换实现（2026-08-13）
+
+- `source_rows`保存科技/非科技每张源表的完整JSON行，`source_table_schemas`保存真实列顺序；
+  因而reviews、weekly及非科技sources历史扩展列均可无损导出，不从规范化查询表猜回原字段。
+- `scripts/event_db_cutover.py bootstrap`从当前已验证CSV一次性构建完整库，通过完整性与外键检查后
+  原子替换数据库，并写入`metadata.build_mode=sqlite_primary`。
+- `scripts/event_db_cutover.py apply --source ... --changes ...`在临时副本内事务应用原有中文变更包，
+  导出全部CSV、重新构建规范化查询层并通过校验后，才原子替换正式库；任一步失败都不改正式库。
+- `export-csv`与`export-excel`只从SQLite导出兼容产物。旧`event_map_updater.py apply`检测到
+  `sqlite_primary`后拒绝CSV写入，防止形成双主。
+- 真实库往返验收：SQLite→13张CSV→SQLite后，除动态metadata外所有业务表行数和内容SHA-256一致；
+  重复ID、未知字段和非法关系故障均完成整包回滚。

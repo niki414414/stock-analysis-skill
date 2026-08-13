@@ -398,6 +398,20 @@ def _apply_deletions(df, tname, tdef, deletion_list):
 
 
 def cmd_apply(source, date_short, label, changes_path):
+    # SQLite主库启用后，禁止旧CSV写入入口继续制造双主。
+    shadow_db = os.path.join(DATA_ROOT, "event_map_shadow.db")
+    if os.path.exists(shadow_db):
+        import sqlite3
+        try:
+            con = sqlite3.connect(shadow_db)
+            row = con.execute("SELECT value FROM metadata WHERE key='build_mode'").fetchone()
+            con.close()
+            if row and row[0] == "sqlite_primary":
+                raise RuntimeError(
+                    "SQLite已是唯一事实源；禁止CSV反向写入。请改用 scripts/event_db_cutover.py apply"
+                )
+        except sqlite3.OperationalError:
+            pass
     with open(changes_path, encoding="utf-8") as f:
         changes = json.load(f)
 

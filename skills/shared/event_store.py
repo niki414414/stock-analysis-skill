@@ -38,6 +38,20 @@ EVENT_ID_RE = re.compile(r"[A-Z][A-Z0-9-]*-\d{4}-\d{3}")
 SCHEMA_SQL = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE source_rows(
+  source TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  row_json TEXT NOT NULL,
+  PRIMARY KEY(source,table_name,row_key)
+);
+CREATE TABLE source_table_schemas(
+  source TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  columns_json TEXT NOT NULL,
+  PRIMARY KEY(source,table_name)
+);
 CREATE TABLE companies(
   company_id INTEGER PRIMARY KEY,
   company_name TEXT NOT NULL UNIQUE,
@@ -217,7 +231,19 @@ CREATE INDEX idx_links_event ON company_event_links(event_pk);
 CREATE INDEX idx_links_role2 ON company_event_links(role_2);
 CREATE INDEX idx_forward_sector ON forward_events(sector);
 CREATE INDEX idx_anomaly_type ON import_anomalies(issue_type);
+CREATE INDEX idx_source_rows_order ON source_rows(source,table_name,ordinal);
 """
+
+SOURCE_TABLE_IDS = {
+    "tech": {
+        "events": "事件ID", "mapping": "映射ID", "forward": "前瞻ID",
+        "corrections": None, "signals_early": "signal_id", "reviews": None,
+        "sources": "来源ID", "weekly": None, "sectors_status": "sector_id",
+    },
+    "nonfin": {
+        "events": "事件ID", "mapping": None, "forward": None, "sources": "来源ID",
+    },
+}
 
 
 def _latest_tech_dir() -> Path:
@@ -292,8 +318,12 @@ def pool_benefit_tier(row: pd.Series | dict) -> str:
 
 
 class EventStoreBuilder:
-    def __init__(self, db_path: Union[Path, str] = DEFAULT_DB):
+    def __init__(self, db_path: Union[Path, str] = DEFAULT_DB,
+                 tech_dir: Optional[Union[Path, str]] = None,
+                 nonfin_dir: Optional[Union[Path, str]] = None):
         self.db_path = Path(db_path)
+        self.tech_dir = Path(tech_dir) if tech_dir else None
+        self.nonfin_dir = Path(nonfin_dir) if nonfin_dir else None
         self.audit: dict[str, Any] = {"anomalies": {}, "sources": {}, "counts": {}}
         self.code_df, self.code_map = _company_master()
         self.company_ids: dict[str, int] = {}
@@ -308,11 +338,13 @@ class EventStoreBuilder:
         try:
             con.executescript(SCHEMA_SQL)
             self._import_companies(con)
-            tech = _latest_tech_dir()
-            nonfin = _latest_nonfin_dir()
+            tech = self.tech_dir or _latest_tech_dir()
+            nonfin = self.nonfin_dir if self.nonfin_dir is not None else _latest_nonfin_dir()
             self.audit["sources"] = {"tech": str(tech), "nonfin": str(nonfin) if nonfin else None}
+            self._import_source_rows(con, "tech", tech)
             self._import_source(con, "tech", tech)
             if nonfin:
+                self._import_source_rows(con, "nonfin", nonfin)
                 self._import_source(con, "nonfin", nonfin)
             self._import_company_pool_links(con)
             self._write_metadata(con)
@@ -369,6 +401,29 @@ class EventStoreBuilder:
             (source, table, row_number, issue, record_id, detail, _row_json(row)),
         )
         self.audit["anomalies"][issue] = self.audit["anomalies"].get(issue, 0) + 1
+
+    def _import_source_rows(self, con, source: str, directory: Path):
+        """Preserve complete source rows so SQLite can later export without guessing fields."""
+        for table_name, id_col in SOURCE_TABLE_IDS[source].items():
+            frame, path = _load_csv(directory, table_name)
+            if path is None:
+                continue
+            con.execute(
+                "INSERT INTO source_table_schemas(source,table_name,columns_json) VALUES(?,?,?)",
+                (source, table_name, json.dumps(list(frame.columns), ensure_ascii=False)),
+            )
+            for ordinal, (_, row) in enumerate(frame.iterrows(), start=1):
+                raw_id = str(row.get(id_col, "") or "").strip() if id_col else ""
+                if raw_id:
+                    row_key = raw_id
+                else:
+                    payload = _row_json(row)
+                    suffix = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+                    row_key = f"__row_{ordinal:06d}_{suffix}"
+                con.execute(
+                    "INSERT INTO source_rows(source,table_name,row_key,ordinal,row_json) VALUES(?,?,?,?,?)",
+                    (source, table_name, row_key, ordinal, _row_json(row)),
+                )
 
     def _import_companies(self, con):
         rows = [(r["name"].strip(), r["code"], "A股", r.get("list_status", "")) for _, r in self.code_df.iterrows()]
@@ -718,8 +773,10 @@ class EventStore:
 
 
 def build_shadow_database(db_path: Union[Path, str] = DEFAULT_DB,
-                          audit_path: Union[Path, str] = DEFAULT_AUDIT):
-    audit = EventStoreBuilder(db_path).build()
+                          audit_path: Union[Path, str] = DEFAULT_AUDIT,
+                          tech_dir: Optional[Union[Path, str]] = None,
+                          nonfin_dir: Optional[Union[Path, str]] = None):
+    audit = EventStoreBuilder(db_path, tech_dir=tech_dir, nonfin_dir=nonfin_dir).build()
     audit_file = Path(audit_path)
     audit_file.parent.mkdir(parents=True, exist_ok=True)
     audit_file.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
