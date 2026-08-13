@@ -6,3 +6,5 @@ __pycache__/
 .DS_Store
 last_scan_alerts.txt
 skills/quality-compounder/cache/
+# 扫描结果必须写到工作区根目录；忽略误用相对路径产生的仓库内副本。
+/分析记录/
