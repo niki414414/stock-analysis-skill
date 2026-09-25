@@ -115,8 +115,9 @@ python3 scripts/create_local_backup.py --verify \
   "$TZ_CODEX_HOME/迁移归档/tz-codex-backup-YYYYMMDD-HHMMSS.zip"
 ```
 
-迁移包包含当前Git源码快照、完整Git bundle、事件地图、公司池、研究材料、分析记录、
-持仓和SHA-256清单。`.env`、Git凭据、日志和缓存明确排除。
+迁移包包含当前Git源码快照、完整Git bundle、事件地图主库、催化生命周期数据库、公司池、
+研究材料、分析记录、持仓和SHA-256清单。新版包校验同时检查两份关键数据库是否在包内；
+旧版包仅能证明包内文件哈希正确，不能据此认定活动数据齐全。`.env`、Git凭据、日志和缓存明确排除。
 
 脚本只备份已提交的 Git `HEAD`；如工作树不干净会直接拒绝运行，避免产生
 “看似最新、实际漏文件”的假备份。历史 ZIP 仅作恢复点，定期清理需要人工确认。

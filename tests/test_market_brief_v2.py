@@ -170,10 +170,30 @@ class MarketBriefV2Tests(unittest.TestCase):
         self.assertIn(result["volume_box"]["gate"], {
             "inside_box_neutral", "support_testing", "support_absorption",
             "resistance_testing", "resistance_distribution",
+            "resistance_rejected",
             "breakout_pending_volume", "breakout_confirmed",
             "breakdown_pending_volume", "breakdown_confirmed",
         })
         self.assertIn("量能闸门", result["confirmation"])
+
+    def test_close_below_touched_resistance_is_rejection_not_pending_test(self):
+        frame = pd.DataFrame([
+            {"trade_date": f"202609{day:02d}", "open": 100, "high": 102,
+             "low": 98, "close": 100, "pct_chg": 0, "amount": 100}
+            for day in range(1, 21)
+        ] + [{"trade_date": "20260921", "open": 103, "high": 105,
+              "low": 94, "close": 95, "pct_chg": -8, "amount": 80}])
+        signal = MODULE._volume_box_context(
+            frame, {"lower": 92, "upper": 94}, {"lower": 100, "upper": 102}
+        )
+        self.assertEqual(signal["gate"], "resistance_rejected")
+
+    def test_v2_representative_stock_output_is_observation_not_trade_order(self):
+        article = MODULE.build_brief(bundle())["article"]
+        self.assertIn("个股买点须另做六层核验", article)
+        self.assertIn("不是代表股的独立买卖指令", article)
+        for phrase in ("试仓", "低吸区", "生死线", "减交易仓"):
+            self.assertNotIn(phrase, article)
 
     def test_sector_roles_are_not_one_unified_ranking(self):
         selected = MODULE.select_sector_roles(bundle()["sectors"])
@@ -211,10 +231,26 @@ class MarketBriefV2Tests(unittest.TestCase):
             latest = Path(directory) / "latest.json"
             latest.write_text(json.dumps({"as_of_date": "20260828"}), encoding="utf-8")
             self.assertIsNone(MODULE._load_previous(latest, current_date="20260821"))
-            self.assertEqual(
-                MODULE._load_previous(latest, current_date="20260828")["as_of_date"],
-                "20260828",
+            self.assertIsNone(MODULE._load_previous(latest, current_date="20260828"))
+
+    def test_lineage_uses_last_earlier_date_not_output_directory_or_same_day(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lineage_dir = root / "lineage"
+            output_dir = root / "focused_output"
+            lineage_dir.mkdir()
+            output_dir.mkdir()
+            for date in ("20260918", "20260922", "20260924", "20260928"):
+                (lineage_dir / f"market_brief_{date}_180000.json").write_text(
+                    json.dumps({"as_of_date": date}), encoding="utf-8"
+                )
+            (output_dir / "latest.json").write_text(
+                json.dumps({"as_of_date": "20260918"}), encoding="utf-8"
             )
+            previous, source = MODULE._load_previous_brief("20260924", lineage_dir)
+            self.assertEqual(previous["as_of_date"], "20260922")
+            self.assertEqual(source.parent, lineage_dir)
+            self.assertNotEqual(source.parent, output_dir)
 
 
 if __name__ == "__main__":

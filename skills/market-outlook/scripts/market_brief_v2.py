@@ -213,7 +213,11 @@ def _volume_box_context(
     candle_range = max(high - low, 0.0001)
     upper_wick = (high - max(float(latest.get("open", current)), current)) / candle_range
     support_touch = bool(support and low <= support["upper"] and current >= support["lower"])
-    resistance_touch = bool(resistance and high >= resistance["lower"] and current <= resistance["upper"])
+    resistance_rejected = bool(resistance and high >= resistance["lower"] and current < resistance["lower"])
+    resistance_touch = bool(
+        resistance and high >= resistance["lower"]
+        and resistance["lower"] <= current <= resistance["upper"]
+    )
     above_resistance = bool(resistance and current > resistance["upper"])
     below_support = bool(support and current < support["lower"])
     if above_resistance:
@@ -226,6 +230,12 @@ def _volume_box_context(
         return {"signal": "价格跌破支撑但量能未放大，破位待确认", "gate": "breakdown_pending_volume", "amount_ratio_20d": round(ratio, 2) if ratio is not None else None}
     if support_touch and ratio is not None and ratio < 1.0 and pct >= -0.5:
         return {"signal": "支撑区缩量承接", "gate": "support_absorption", "amount_ratio_20d": round(ratio, 2)}
+    if resistance_rejected:
+        return {
+            "signal": "盘中触及压力后收于区间下方，突破未确认",
+            "gate": "resistance_rejected",
+            "amount_ratio_20d": round(ratio, 2) if ratio is not None else None,
+        }
     if resistance_touch and ratio is not None and ratio >= 1.2 and (pct <= 0.5 or upper_wick >= 0.35):
         return {"signal": "压力区放量滞涨", "gate": "resistance_distribution", "amount_ratio_20d": round(ratio, 2)}
     if resistance_touch:
@@ -358,7 +368,7 @@ def build_price_map(
         ),
         "invalidation": (
             f"收盘跌破{_zone_text(stop_zone)}下沿且次日不能收回"
-            if stop_zone else "下方边界数据不足，暂不给生死线"
+            if stop_zone else "下方边界数据不足，暂不给结构失效观察线"
         ),
         "held_action": _held_action(permission, volume),
         "unheld_action": _unheld_action(permission, volume),
@@ -371,22 +381,22 @@ def build_price_map(
 
 def _held_action(permission: str, volume: dict) -> str:
     if permission == "PRICE_BREAK_BELOW_PREVIOUS_BOX":
-        return "先降低进攻仓，观察次级支撑能否收回"
+        return "优先核对原策略退出条件，并进入持仓专项复核"
     if volume.get("latest_price_reaction") == "放量滞涨或冲高回落":
-        return "保留底仓但减交易仓，后续再放量滞涨则继续退出"
+        return "核对量价风险与原策略退出条件，不按单次分歧直接清仓"
     if permission in {"WATCH_RESISTANCE_REACTION", "NO_TRADE_NARROW_RANGE"}:
-        return "以持有和移动止盈为主，不在压力附近加仓"
-    return "沿第一支撑持有，收盘有效跌破再改判"
+        return "按原策略复核持仓，压力附近不把箱体观察当加仓依据"
+    return "以支撑区作复核路标，具体持有或退出仍按原策略判断"
 
 
 def _unheld_action(permission: str, volume: dict) -> str:
     if permission == "PRICE_BREAK_BELOW_PREVIOUS_BOX":
-        return "暂不抄底，等收回原支撑或在次级支撑形成承接"
+        return "先观察能否收回原支撑，不把下跌本身当买点"
     if permission == "PRICE_BREAK_ABOVE_PREVIOUS_BOX":
-        return "不追第一根突破，等回踩突破区确认"
+        return "观察突破后的回踩确认，当前箱体不构成买入授权"
     if volume.get("latest_price_reaction") == "放量滞涨或冲高回落":
-        return "加速分歧段不追，等缩量回踩第一支撑"
-    return "只在第一支撑区出现承接时试仓，不在箱体中上部追涨"
+        return "观察缩量回踩第一支撑，不把分歧后的反弹当买点"
+    return "观察第一支撑区的承接；个股买点须另做六层核验"
 
 
 def _score_rows(sectors: list[dict]) -> list[dict]:
@@ -629,7 +639,7 @@ def _sector_paragraph(row: dict) -> str:
     )
     base = (
         f"{row['name']}承担“{row['role']}”角色，当前为{price['stage']}，{breadth_text}。"
-        f"板块代理{row['proxy'].get('code') or '未提供代码'}的合理观察/低吸区为"
+        f"板块代理{row['proxy'].get('code') or '未提供代码'}的第一支撑观察区为"
         f"{_zone_text(price['support_zones'][0])}，第二支撑{_zone_text(price['support_zones'][1])}；"
         f"{pressure_text}。到位不等于买入，需看到缩量承接或收盘收回。"
     )
@@ -646,9 +656,10 @@ def _sector_paragraph(row: dict) -> str:
         technical_extra = f" 最近确认底分型日期为{fractal.get('trade_date')}，但仍需突破压力区验证。"
     return (
         base
-        + f"代表股{rep['name']}（{rep.get('role')}）现价{rep['current']:.2f}，低吸观察区"
+        + f"代表股{rep['name']}（{rep.get('role')}）现价{rep['current']:.2f}，支撑观察区"
         f"{_zone_text(rep['support_zones'][0])}，压力区{_zone_text(rep['resistance_zones'][0])}，"
-        f"生死线按“{rep['invalidation']}”执行。已持有：{rep['held_action']}；未持有：{rep['unheld_action']}。"
+        f"结构失效观察条件为“{rep['invalidation']}”。已持有：{rep['held_action']}；"
+        f"未持有：{rep['unheld_action']}。这些区间不是代表股的独立买卖指令。"
         f"{baseline_label}{_amount_yi(vol.get('startup_baseline'), vol.get('unit'))}，4倍高潮候选"
         f"{_amount_yi(vol.get('climax_candidate'), vol.get('unit'))}，目前记录为第"
         f"{vol.get('divergence_count', 0)}次放量分歧；只有接近阈值又滞涨/冲高回落才提高退出风险。"
@@ -669,11 +680,11 @@ def _questions(result: dict) -> list[dict]:
             continue
         rows.append({
             "question": f"{rep['name']}已经持有，第一次分歧要全部卖吗？",
-            "answer": f"不自动清仓。当前记录为第{rep['volume'].get('divergence_count', 0)}次分歧；按{rep['held_action']}处理，收盘失守生死线或再次放量滞涨才升级退出。",
+            "answer": f"不自动清仓。当前记录为第{rep['volume'].get('divergence_count', 0)}次分歧；{rep['held_action']}。收盘失守结构观察区或再次放量滞涨，应进入持仓专项复核。",
         })
         rows.append({
             "question": f"没有{rep['name']}，直接启动还能追吗？",
-            "answer": f"不追加速段。优先等{_zone_text(rep['support_zones'][0])}附近缩量承接，或突破后回踩确认。",
+            "answer": f"不把容量代表股自动当候选。可观察{_zone_text(rep['support_zones'][0])}附近承接或突破后回踩，买点仍需事件、公司和六层核验。",
         })
         break
     return rows[:6]
@@ -1018,11 +1029,30 @@ def _load_previous(path: Path, current_date: str | None = None) -> dict | None:
     try:
         previous = json.loads(path.read_text(encoding="utf-8"))
         previous_date = str(previous.get("as_of_date") or "")
-        if current_date and previous_date and previous_date > str(current_date):
+        # A same-day rerun is not a new observation and must not inherit its
+        # own box as the previous trading day's structure.
+        if current_date and (not previous_date or previous_date >= str(current_date)):
             return None
         return previous
     except Exception:
         return None
+
+
+def _load_previous_brief(
+    current_date: str, lineage_dir: Path = DEFAULT_OUTPUT_DIR,
+) -> tuple[dict | None, Path | None]:
+    """Read the latest earlier trading-day brief from an explicit lineage store.
+
+    Output location is deliberately independent: saving a focused or replay
+    report elsewhere must not change the market's prior box.
+    """
+    if not lineage_dir.is_dir():
+        return None, None
+    for path in sorted(lineage_dir.glob("market_brief_????????_??????.json"), reverse=True):
+        previous = _load_previous(path, current_date=current_date)
+        if previous:
+            return previous, path
+    return None, None
 
 
 def save_result(result: dict, output_dir: Path) -> dict:
@@ -1054,6 +1084,11 @@ def main() -> None:
     parser.add_argument("--sector-limit", type=int, default=5)
     parser.add_argument("--focus", help="优先写入的申万一级板块，多个用逗号分隔")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument(
+        "--lineage-dir", default=str(DEFAULT_OUTPUT_DIR),
+        help="上一交易日箱体的版本库；默认正式V2目录，与输出目录无关",
+    )
+    parser.add_argument("--previous-snapshot", help="显式指定早于目标交易日的V2 JSON快照")
     parser.add_argument("--json", action="store_true", help="标准输出完整证据JSON，否则输出文章")
     parser.add_argument("--save", action="store_true", help="保存版本化JSON、Markdown及latest.json")
     parser.add_argument("--dump-input", help="将本次实际消费的数据包另存为JSON")
@@ -1067,8 +1102,20 @@ def main() -> None:
         bundle = fetch_live_bundle(args.as_of, args.sector_limit, focus_names)
     market_rows = _normalise_bars(bundle["market"]["bars"])
     current_date = str(market_rows.iloc[-1]["trade_date"])
-    previous = _load_previous(output_dir / "latest.json", current_date=current_date)
+    if args.previous_snapshot:
+        lineage_path = Path(args.previous_snapshot)
+        previous = _load_previous(lineage_path, current_date=current_date)
+        if previous is None:
+            parser.error("--previous-snapshot必须是有效且早于目标交易日的V2快照")
+    else:
+        previous, lineage_path = _load_previous_brief(
+            current_date, Path(args.lineage_dir)
+        )
     result = build_brief(bundle, previous=previous, sector_limit=args.sector_limit)
+    result["lineage"] = {
+        "previous_date": previous.get("as_of_date") if previous else None,
+        "source_path": str(lineage_path.resolve()) if lineage_path else None,
+    }
     if args.dump_input:
         Path(args.dump_input).write_text(
             json.dumps(_jsonable_bundle(bundle), ensure_ascii=False, indent=2), encoding="utf-8"

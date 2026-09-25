@@ -36,6 +36,7 @@ DATA_TARGETS = [
     Path("技能数据/公司.xlsx"),
     # 文件名是迁移期遗留；库内metadata.build_mode=sqlite_primary才是主库身份依据。
     Path("技能数据/event_map_shadow.db"),
+    Path("技能数据/catalyst_research_memory.db"),
     Path("技能数据/event_db_audit.json"),
     Path("技能数据/event_db_migration_history.json"),
     Path("技能数据/decision_journal.jsonl"),
@@ -46,6 +47,11 @@ DATA_TARGETS = [
     Path("技能数据/market_daily_snapshot"),
     Path("技能数据/运行记录"),
 ]
+
+REQUIRED_DATA_TARGETS = (
+    Path("技能数据/event_map_shadow.db"),
+    Path("技能数据/catalyst_research_memory.db"),
+)
 
 FORBIDDEN_NAMES = {".env", ".git", "__pycache__", ".DS_Store"}
 FORBIDDEN_SUFFIXES = {".pyc", ".log"}
@@ -165,9 +171,12 @@ def create_backup() -> Path:
                 copied.append(rel.as_posix())
             else:
                 missing.append(rel.as_posix())
+        missing_required = [str(rel) for rel in REQUIRED_DATA_TARGETS if rel.as_posix() in missing]
+        if missing_required:
+            raise RuntimeError(f"关键活动数据库缺失，拒绝生成不完整备份: {missing_required}")
 
         manifest = {
-            "format_version": 1,
+            "format_version": 2,
             "created_at": datetime.now().astimezone().isoformat(),
             "workspace": str(WORKSPACE),
             "git_head": head,
@@ -177,6 +186,7 @@ def create_backup() -> Path:
             "git_ahead": ahead,
             "git_behind": behind,
             "copied_targets": copied,
+            "required_data_targets": [rel.as_posix() for rel in REQUIRED_DATA_TARGETS],
             "missing_optional_targets": missing,
             "credentials_included": False,
         }
@@ -215,7 +225,7 @@ def create_backup() -> Path:
     return zip_path
 
 
-def verify_backup(zip_path: Path) -> None:
+def verify_backup(zip_path: Path) -> int:
     with tempfile.TemporaryDirectory(prefix="tz-codex-verify-") as tmp:
         target = Path(tmp)
         with zipfile.ZipFile(zip_path) as archive:
@@ -227,7 +237,17 @@ def verify_backup(zip_path: Path) -> None:
         if len(roots) != 1:
             raise RuntimeError("迁移包顶层目录结构异常")
         root = roots[0]
+        manifest = json.loads((root / "MANIFEST.json").read_text(encoding="utf-8"))
+        format_version = int(manifest.get("format_version", 1))
         rows = json.loads((root / "SHA256SUMS.json").read_text(encoding="utf-8"))
+        if format_version >= 2:
+            checksummed_paths = {row["path"] for row in rows}
+            for rel in REQUIRED_DATA_TARGETS:
+                target_path = root / "02_活动数据" / rel
+                if not target_path.is_file():
+                    raise RuntimeError(f"迁移包缺少关键活动数据库: {rel.as_posix()}")
+                if target_path.relative_to(root).as_posix() not in checksummed_paths:
+                    raise RuntimeError(f"关键活动数据库未纳入SHA-256清单: {rel.as_posix()}")
         for row in rows:
             path = root / row["path"]
             if not path.is_file():
@@ -235,6 +255,7 @@ def verify_backup(zip_path: Path) -> None:
             if path.stat().st_size != row["size"] or sha256(path) != row["sha256"]:
                 raise RuntimeError(f"哈希不匹配: {row['path']}")
         assert_no_credentials(root)
+        return format_version
 
 
 def main() -> None:
@@ -242,8 +263,8 @@ def main() -> None:
     parser.add_argument("--verify", type=Path, help="只校验已有迁移包")
     args = parser.parse_args()
     if args.verify:
-        verify_backup(args.verify.expanduser().resolve())
-        print("迁移包校验通过")
+        version = verify_backup(args.verify.expanduser().resolve())
+        print("迁移包校验通过" if version >= 2 else "迁移包包内哈希校验通过；旧格式未校验关键数据覆盖")
         return
     try:
         output = create_backup()
