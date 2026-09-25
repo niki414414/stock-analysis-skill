@@ -128,6 +128,18 @@ def normalize_short(rows: list[dict]) -> list[dict]:
     normalized = []
     for row in rows:
         hints = short_chart_teaching(row)
+        price_plan = short_reference_bid(row)
+        conditional = (
+            price_plan["reference_bid"] is not None
+            and row.get("risk_tier") == "A_结构较好"
+            and row.get("continuity_tier") in {"A_持续强势", "B_结构合格待确认"}
+            and not row.get("risk_flags")
+        )
+        display_plan = price_plan if conditional else {
+            "reference_bid": None, "confirmation_low": None, "confirmation_high": None,
+        }
+        if not conditional:
+            hints["竞价计划"] = "仅观察，不提供委托报价；待下一次扫描重新分层"
         normalized.append({
         "trade_date": row.get("trade_date"), "task": "short-ma5",
         "code": row.get("ts_code"), "name": row.get("name"),
@@ -135,11 +147,18 @@ def normalize_short(rows: list[dict]) -> list[dict]:
         "holding_period": "隔夜；买入后的下一交易日闭环", "market_gate": "推土机市场闸门待盘前确认",
         "strategy_score": None,
         "current_state": f"{row.get('continuity_tier') or '持续性待分层'}；{row.get('signal') or '—'}；{row.get('trend_stage') or '—'}；{row.get('risk_tier') or '—'}；活跃排名{row.get('activity_rank') or '—'}",
-        "next_action": short_execution_plan(row),
+        "next_action": (
+            short_execution_plan(row) if conditional else
+            "仅观察：当前未通过盘前可报价且结构合格的共同条件，不形成委托计划；"
+            "待下一次扫描重新分层。原始技术数据保留在details供研究，不作为买入报价"
+        ),
         "needs_six_layer": False, "risk_flags": row.get("risk_flags", ""),
+        "decision_stage": "conditional_watch" if conditional else "observe_only",
+        "decision_stage_label": "待盘中确认" if conditional else "仅观察",
+        "actionable_now": False,
         "chart_teaching": hints,
         "execution_state": "待人工确认",
-        "price_plan": short_reference_bid(row),
+        "price_plan": display_plan,
         "source_script": SHORT_SCRIPT.name,
         "details": row,
         })
@@ -234,6 +253,17 @@ def normalize_swing(rows: list[dict]) -> list[dict]:
         "current_state": row.get("lr_label"),
         "next_action": row.get("six_layer_action") or "进入六层候选队列，核验催化、市场响应和定价程度",
         "needs_six_layer": True, "risk_flags": "",
+        "decision_stage": "needs_deep_review" if (
+            row.get("event_bucket") in {"red", "yellow"}
+            and row.get("market_response_state") == "confirmed"
+            and row.get("lr_label") in {"就绪", "预热"}
+        ) else "observe_only",
+        "decision_stage_label": "待六层深研" if (
+            row.get("event_bucket") in {"red", "yellow"}
+            and row.get("market_response_state") == "confirmed"
+            and row.get("lr_label") in {"就绪", "预热"}
+        ) else "仅观察",
+        "actionable_now": False,
         "source_script": SWING_SCRIPT.name,
         "details": row,
     } for row in rows]
@@ -249,6 +279,9 @@ def normalize_core(payload: dict) -> list[dict]:
         "strategy_score": row.get("cagr_np"), "current_state": "待六层验证",
         "next_action": "进入六层候选队列，核验估值、长期趋势与未来催化",
         "needs_six_layer": True, "risk_flags": "",
+        "decision_stage": "needs_deep_review",
+        "decision_stage_label": "待六层深研",
+        "actionable_now": False,
         "source_script": CORE_SCRIPT.name,
         "details": row,
     } for row in payload.get("candidates", [])]
@@ -351,12 +384,18 @@ def write_report(
     for task, rows in results.items():
         lines += [f"## {labels[task]}", "", f"候选：{len(rows)}只；计划持有：{rows[0]['holding_period'] if rows else '—'}。", ""]
         if not rows:
-            lines += ["本次无候选或任务未产生结果。", ""]
+            lines += ["本次无候选；不能为凑名单放宽条件。", ""]
             continue
-        lines += ["### 盘前重点核查池（最多5只）", "", "|代码|名称|收敛原因|当前状态|下一步|", "|---|---|---|---|---|"]
+        lines += [
+            "当前具备操作条件：0只。扫描结果只有‘仅观察’、‘待盘中确认’或‘待六层深研’，",
+            "不能把盘后价格区间或初筛得分当作当下买入许可。", "",
+            "### 关注池（最多5只，含观察标的）", "",
+            "|代码|名称|决策阶段|收敛原因|当前状态|下一步|", "|---|---|---|---|---|---|",
+        ]
         for row in focus.get(task, []):
             lines.append(
-                f"|{row['code']}|{row['name']}|{row['focus_reason']}|{row['current_state'] or '—'}|{row['next_action']}|"
+                f"|{row['code']}|{row['name']}|{row.get('decision_stage_label', '仅观察')}|"
+                f"{row['focus_reason']}|{row['current_state'] or '—'}|{row['next_action']}|"
             )
         if task == "short-ma5":
             lines += [
@@ -383,10 +422,10 @@ def write_report(
                 "|平|平开或小幅波动，不能快速转强|反弹分批退出，不等待基本面理由|",
                 "|弱|低开、跌破前日承接低点或板块退潮|优先退出，不补仓、不改成波段|", "",
             ]
-        lines += ["", "### 扩展观察池（前20只，保留原始排序）", "", "|代码|名称|候选原因|市场/板块闸门|当前状态|下一步|六层|", "|---|---|---|---|---|---|---|"]
+        lines += ["", "### 扩展观察池（前20只，保留原始排序）", "", "|代码|名称|决策阶段|候选原因|市场/板块闸门|当前状态|下一步|六层|", "|---|---|---|---|---|---|---|---|"]
         for row in rows[:20]:
             lines.append(
-                f"|{row['code']}|{row['name']}|{row['candidate_reason']}|{row['market_gate']}|{row['current_state'] or '—'}|"
+                f"|{row['code']}|{row['name']}|{row.get('decision_stage_label', '仅观察')}|{row['candidate_reason']}|{row['market_gate']}|{row['current_state'] or '—'}|"
                 f"{row['next_action']}|{'是' if row['needs_six_layer'] else '否'}|"
             )
         lines.append("")
@@ -404,6 +443,7 @@ def write_short_html_report(rows: list[dict], focus: list[dict], path: Path, gen
         cards.append(
             f"<article><h2>{esc(row['name'])} <small>{esc(row['code'])}</small></h2>"
             f"<p class='price'>{esc(price)}</p>"
+            f"<p><strong>决策阶段：</strong>{esc(row.get('decision_stage_label', '仅观察'))}</p>"
             f"<p><strong>筛选状态：</strong>{esc(row.get('current_state'))}</p>"
             f"<p><strong>关注原因：</strong>{esc(row.get('focus_reason'))}</p>"
             f"<p><strong>价格与执行：</strong>{esc(row.get('next_action'))}</p></article>"
@@ -411,7 +451,7 @@ def write_short_html_report(rows: list[dict], focus: list[dict], path: Path, gen
     all_rows = "".join(
         f"<tr><td>{esc(row['code'])}</td><td>{esc(row['name'])}</td>"
         f"<td>{esc((row.get('price_plan') or {}).get('reference_bid'))}</td>"
-        f"<td>{esc(row.get('current_state'))}</td></tr>"
+        f"<td>{esc(row.get('current_state'))}</td><td>{esc(row.get('decision_stage_label', '仅观察'))}</td></tr>"
         for row in rows
     )
     page = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
@@ -421,9 +461,9 @@ main{{max-width:900px;margin:auto}}h1{{font-size:29px}}.meta{{color:#65747d}}.no
 .notice{{border-left:4px solid #188458}}article h2{{margin:0}}small{{color:#687780;font-size:14px}}.price{{color:#126e55;font-weight:700;font-size:25px;margin:10px 0}}
 p{{line-height:1.7}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:10px;border-bottom:1px solid #e5eaed;vertical-align:top}}@media(max-width:650px){{td,th{{font-size:13px}}}}</style></head><body><main>
 <h1>推土机短线观察池</h1><p class="meta">生成时间 {esc(generated_at)} · 数据日期 {esc(rows[0]['trade_date'] if rows else '—')} · 共 {len(rows)} 只</p>
-<div class="notice"><strong>先看结论：</strong>以下价格是收盘后生成的试验买入限价上限，不是成交保证。默认观察集合竞价，9:25核对开盘，9:30后重算动态MA5并确认承接，再决定是否委托。未成交单可能进入连续竞价，撤单以券商确认回报为准。</div>
+<div class="notice"><strong>先看结论：</strong>当前具备操作条件0只。‘待盘中确认’仍不是买入许可。以下价格是收盘后生成的试验买入限价上限，不是成交保证。默认观察集合竞价，9:25核对开盘，9:30后重算动态MA5并确认承接，再决定是否委托。未成交单可能进入连续竞价，撤单以券商确认回报为准。</div>
 <h2>盘前重点核查</h2>{''.join(cards)}<div class="list"><h2>完整观察池</h2>
-<table><thead><tr><th>代码</th><th>名称</th><th>试验参考价（元）</th><th>当前状态</th></tr></thead><tbody>{all_rows}</tbody></table></div>
+<table><thead><tr><th>代码</th><th>名称</th><th>试验参考价（元）</th><th>当前状态</th><th>决策阶段</th></tr></thead><tbody>{all_rows}</tbody></table></div>
 </main></body></html>"""
     path.write_text(page, encoding="utf-8")
 
@@ -454,7 +494,11 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     results = {item: execute_task(item, args.as_of, args.top, run_dir) for item in tasks}
     focus = {item: select_focus(item, rows) for item, rows in results.items()}
-    payload = {"generated_at": generated_at, "tasks": results, "focus": focus}
+    payload = {
+        "generated_at": generated_at, "tasks": results, "focus": focus,
+        "actionable_now_counts": {item: sum(bool(row["actionable_now"]) for row in rows)
+                                  for item, rows in results.items()},
+    }
     json_path = run_dir / "strategy_tasks.json"
     report_path = run_dir / "strategy_tasks.md"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

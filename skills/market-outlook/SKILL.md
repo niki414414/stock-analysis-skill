@@ -162,6 +162,8 @@ python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/market_framework_back
   仍调用 `scripts/stock_strategy_router.py`，不得在复盘脚本中复制选股算法；
 - `holding_review_queue` 从工作区 `holdings.csv` 召回非零持仓，逐项交给股票持仓模式或
   ETF/基金复核；大盘脚本不得直接生成个股买卖价；
+- `personal_data_gate`标出未核对至本次行情日的持仓；此时只保留研究队列，
+  不依据旧数量或成本生成个性化仓位、盈亏动作，先请用户确认；
 - 持仓必须沿用 `strategy_identity`。身份缺失时先让用户归类，禁止短线被套后改成波段或底仓；
 - 市场状态可以调整仓位倾向和策略启用级别，不能覆盖个股支撑、事件失效或原策略退出条件；
 - 三种策略独立输出，禁止跨策略总排名。

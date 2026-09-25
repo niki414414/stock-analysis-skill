@@ -10,7 +10,6 @@ quality are verified by the market-outlook workflow.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -38,7 +37,7 @@ ALIASES_PATH = SKILL_ROOT / "config" / "sector_aliases.json"
 EVENT_QUERY = (
     REPO_ROOT / "skills" / "stock-analysis" / "scripts" / "event_map_query.py"
 )
-NONFIN_ROOT = DATA_ROOT / "非科技产业事件地图"
+EVENT_DB = DATA_ROOT / "event_map_shadow.db"
 COMPANY_POOL = DATA_ROOT / "公司.xlsx"
 CODE_MAP = DATA_ROOT / "company_code_map.csv"
 QUALITY_CACHE = (
@@ -85,30 +84,16 @@ def normalize_code(raw) -> Optional[str]:
     return digits.zfill(6) if digits else None
 
 
-def latest_nonfin_dir() -> Path:
-    dirs = [
-        Path(path) for path in glob.glob(
-            str(NONFIN_ROOT / "非科技主线产业事件地图_CSV包_*")
-        )
-        if Path(path).is_dir()
-    ]
-    if not dirs:
-        raise FileNotFoundError(f"未找到非科技事件CSV目录: {NONFIN_ROOT}")
-    return max(dirs, key=lambda path: path.name)
+def load_nonfin_tables(db_path: Path = EVENT_DB) -> tuple[pd.DataFrame, pd.DataFrame, Path]:
+    """Read the historical Chinese-column contract from the SQLite primary store."""
+    from skills.shared.event_store import EventStore
 
-
-def load_nonfin_tables() -> tuple[pd.DataFrame, pd.DataFrame, Path]:
-    directory = latest_nonfin_dir()
-    event_files = glob.glob(str(directory / "events_*.csv"))
-    mapping_files = glob.glob(str(directory / "mapping_*.csv"))
-    if not event_files:
-        raise FileNotFoundError(f"{directory} 下未找到 events_*.csv")
-    events = pd.read_csv(event_files[0], dtype=str).fillna("")
-    mappings = (
-        pd.read_csv(mapping_files[0], dtype=str).fillna("")
-        if mapping_files else pd.DataFrame()
-    )
-    return events, mappings, directory
+    store = EventStore(db_path)
+    events = pd.DataFrame(store.source_table("nonfin", "events")).fillna("")
+    if events.empty:
+        raise RuntimeError(f"SQLite主库缺少非科技事件: {db_path}")
+    mappings = pd.DataFrame(store.source_table("nonfin", "mapping")).fillna("")
+    return events, mappings, db_path
 
 
 def load_active_windows() -> dict[str, dict]:
@@ -1062,7 +1047,7 @@ def build_radar(
 ) -> dict:
     pro = get_pro()
     rotation, trade_date = fetch_rotation(pro)
-    events, mappings, event_dir = load_nonfin_tables()
+    events, mappings, event_source = load_nonfin_tables()
     active_windows = load_active_windows()
     aliases = load_aliases()
     pool, code_map, company_store = load_company_sources(company_source)
@@ -1140,7 +1125,7 @@ def build_radar(
             "sector_members": "Tushare index_member_all(SW2021)",
             "sector_breadth": "Tushare daily按申万一级行业成分聚合",
             "sector_moneyflow": "Tushare moneyflow按申万一级行业成分聚合",
-            "event_directory": str(event_dir),
+            "event_store": str(event_source),
             "event_window": "event_map_query.py window --source nonfin",
             "company_relations": (
                 str(DATA_ROOT / "event_map_shadow.db")

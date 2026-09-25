@@ -37,10 +37,35 @@ def test_short_normalization_does_not_require_six_layers():
     assert result["needs_six_layer"] is False
     assert result["execution_state"] == "待人工确认"
     assert "形态" in result["chart_teaching"]
-    assert "撤单须以券商回报为准" in result["next_action"]
-    assert "确认带" in result["next_action"]
-    assert "默认先观察9:25开盘结果" in result["next_action"]
-    assert "试验限价买入报价上限" in result["next_action"]
+    assert "不形成委托计划" in result["next_action"]
+    assert result["price_plan"]["reference_bid"] is None
+    assert result["decision_stage"] == "observe_only"
+    assert result["actionable_now"] is False
+
+
+def test_short_only_labels_clean_quotable_candidate_as_conditional():
+    common = {
+        "trade_date": "20260921", "ts_code": "600001.SH", "name": "样本",
+        "auction_band_valid": True, "auction_reference_low": 10.1,
+        "auction_reference_high": 10.3, "close": 10.4,
+        "risk_tier": "A_结构较好", "risk_flags": "",
+    }
+    ready = MOD.normalize_short([{**common, "continuity_tier": "A_持续强势"}])[0]
+    no_quote = MOD.normalize_short([{**common, "auction_band_valid": False,
+                                     "continuity_tier": "A_持续强势"}])[0]
+    weak = MOD.normalize_short([{**common, "continuity_tier": "C_活跃观察"}])[0]
+    assert ready["decision_stage"] == "conditional_watch"
+    assert ready["actionable_now"] is False
+    assert "试验限价买入报价上限" in ready["next_action"]
+    assert no_quote["decision_stage"] == "observe_only"
+    assert no_quote["price_plan"]["reference_bid"] is None
+    assert weak["decision_stage"] == "observe_only"
+
+
+def test_report_explicitly_allows_no_actionable_candidate(tmp_path):
+    path = tmp_path / "report.md"
+    MOD.write_report({"short-ma5": []}, {"short-ma5": []}, path, "20260925")
+    assert "不能为凑名单放宽条件" in path.read_text(encoding="utf-8")
 
 
 def test_short_reference_bid_is_quotable_and_does_not_promise_execution_price():

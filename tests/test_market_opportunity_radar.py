@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import os
+import sqlite3
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -20,6 +22,24 @@ spec.loader.exec_module(radar)
 
 
 class MarketOpportunityRadarTests(unittest.TestCase):
+    def test_nonfin_events_come_from_sqlite_primary_not_legacy_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "events.db"
+            with sqlite3.connect(db_path) as con:
+                con.execute("CREATE TABLE source_rows(source TEXT, table_name TEXT, row_key TEXT, ordinal INTEGER, row_json TEXT)")
+                con.execute("INSERT INTO source_rows VALUES(?,?,?,?,?)", (
+                    "nonfin", "events", "NEW-1", 1,
+                    json.dumps({"事件ID": "NEW-1", "一级赛道": "航运", "事件名称": "新增事件"}, ensure_ascii=False),
+                ))
+                con.execute("INSERT INTO source_rows VALUES(?,?,?,?,?)", (
+                    "nonfin", "mapping", "NEW-1", 1,
+                    json.dumps({"事件ID": "NEW-1", "公司名称": "测试公司"}, ensure_ascii=False),
+                ))
+            events, mappings, source = radar.load_nonfin_tables(db_path)
+            self.assertEqual(events.iloc[0]["事件ID"], "NEW-1")
+            self.assertEqual(mappings.iloc[0]["公司名称"], "测试公司")
+            self.assertEqual(source, db_path)
+
     def test_market_preheat_basket_enters_existing_preheat_view(self):
         state = {
             "style_index_comparison": {

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import argparse
 import calendar
-import glob
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -33,8 +33,12 @@ WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
     os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
 )))
 DATA_ROOT = WORKSPACE_ROOT / "技能数据"
-TECH_ROOT = DATA_ROOT / "科技产业事件"
-NONFIN_ROOT = DATA_ROOT / "非科技产业事件地图"
+REPO_ROOT = WORKSPACE_ROOT / "repo"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from skills.shared.event_store import EventStore  # noqa: E402
+
+EVENT_DB = DATA_ROOT / "event_map_shadow.db"
 
 
 @dataclass
@@ -45,36 +49,11 @@ class ParsedWindow:
     note: str = ""
 
 
-def latest_dir(source: str) -> Path:
-    if source == "tech":
-        candidates = [Path(p) for p in glob.glob(str(TECH_ROOT / "csv*")) if Path(p).is_dir()]
-    else:
-        candidates = [
-            Path(p) for p in glob.glob(str(NONFIN_ROOT / "非科技主线产业事件地图_CSV包_*"))
-            if Path(p).is_dir()
-        ]
-    if not candidates:
-        raise FileNotFoundError(f"未找到{source}事件地图目录")
-
-    def embedded_date(path: Path) -> str:
-        dates = []
-        for f in path.glob("*.csv"):
-            dates.extend(re.findall(r"_(20\d{6})", f.name))
-        if dates:
-            return max(dates)
-        m = re.search(r"(20\d{6})", path.name)
-        return m.group(1) if m else "00000000"
-
-    return max(candidates, key=embedded_date)
-
-
-def load_table(folder: Path, prefix: str, required: bool = True) -> pd.DataFrame:
-    files = list(folder.glob(f"{prefix}_*.csv"))
-    if not files:
-        if required:
-            raise FileNotFoundError(f"{folder} 下缺少 {prefix}_*.csv")
-        return pd.DataFrame()
-    return pd.read_csv(files[0]).fillna("")
+def load_table(store: EventStore, source: str, table: str, required: bool = True) -> pd.DataFrame:
+    rows = store.source_table(source, table)
+    if not rows and required:
+        raise RuntimeError(f"SQLite主库缺少{source}/{table}记录: {store.db_path}")
+    return pd.DataFrame(rows).fillna("")
 
 
 def month_end(year: int, month: int) -> date:
@@ -202,7 +181,7 @@ def parse_window(text: str, origin: Optional[date]) -> ParsedWindow:
     return ParsedWindow(None, None, "unparsed", "需人工确定时间")
 
 
-def extract_origin(identifier: str, fallback: str, version_date: date) -> date:
+def extract_origin(identifier: str, fallback: str) -> Optional[date]:
     m = re.search(r"(20\d{6})", str(identifier))
     if m:
         try:
@@ -215,14 +194,7 @@ def extract_origin(identifier: str, fallback: str, version_date: date) -> date:
             parsed = safe_date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
             if parsed:
                 return parsed
-    return version_date
-
-
-def version_date(folder: Path) -> date:
-    dates = []
-    for f in folder.glob("*.csv"):
-        dates.extend(re.findall(r"_(20\d{6})", f.name))
-    return datetime.strptime(max(dates), "%Y%m%d").date() if dates else date.today()
+    return None
 
 
 def star_score(value: str) -> int:
@@ -279,15 +251,14 @@ def bucket(window: ParsedWindow) -> str:
     return f"{window.start.isoformat()}~{window.end.isoformat()}"
 
 
-def normalize_tech(folder: Path) -> list[dict]:
-    forward = load_table(folder, "forward")
-    corrections = load_table(folder, "corrections", required=False)
-    signals = load_table(folder, "signals_early", required=False)
-    vdate = version_date(folder)
+def normalize_tech(store: EventStore) -> list[dict]:
+    forward = load_table(store, "tech", "forward")
+    corrections = load_table(store, "tech", "corrections", required=False)
+    signals = load_table(store, "tech", "signals_early", required=False)
     rows = []
     for _, r in forward.iterrows():
         event_id = str(r.get("前瞻ID", ""))
-        origin = extract_origin(event_id, r.get("更新时间", ""), vdate)
+        origin = extract_origin(event_id, r.get("更新时间", ""))
         target_text = str(r.get("时间", "") or r.get("事件窗口", ""))
         parsed = parse_window(target_text, origin)
         related_signal_count = 0
@@ -307,7 +278,7 @@ def normalize_tech(folder: Path) -> list[dict]:
         )
         rows.append({
             "source": "tech", "id": event_id, "sector": r.get("一级赛道", ""),
-            "event": r.get("事件", ""), "origin_date": origin.isoformat(),
+            "event": r.get("事件", ""), "origin_date": origin.isoformat() if origin else "",
             "target_text": target_text, "target_start": parsed.start.isoformat() if parsed.start else "",
             "target_end": parsed.end.isoformat() if parsed.end else "", "precision": parsed.precision,
             "window_bucket": bucket(parsed), "probability": r.get("发生概率", ""),
@@ -320,16 +291,15 @@ def normalize_tech(folder: Path) -> list[dict]:
     return rows
 
 
-def normalize_nonfin(folder: Path) -> list[dict]:
-    forward = load_table(folder, "forward")
-    events = load_table(folder, "events")
-    vdate = version_date(folder)
+def normalize_nonfin(store: EventStore) -> list[dict]:
+    forward = load_table(store, "nonfin", "forward")
+    events = load_table(store, "nonfin", "events")
     event_lookup = events.set_index("事件ID").to_dict("index") if "事件ID" in events.columns else {}
     rows = []
     for _, r in forward.iterrows():
         event_id = str(r.get("事件ID", ""))
         ev = event_lookup.get(event_id, {})
-        origin = extract_origin(event_id, ev.get("最新更新时间", ev.get("更新时间", "")), vdate)
+        origin = extract_origin(event_id, ev.get("最新更新时间", ev.get("更新时间", "")))
         target_text = str(r.get("关键日期/窗口", "") or r.get("观察周期", ""))
         parsed = parse_window(target_text, origin)
         priority = r.get("跟踪优先级", "")
@@ -344,7 +314,7 @@ def normalize_nonfin(folder: Path) -> list[dict]:
             event_name = "未登记事件：" + str(r.get("观察指标", ""))[:48]
         rows.append({
             "source": "nonfin", "id": event_id, "sector": ev.get("一级赛道", ""),
-            "event": event_name, "origin_date": origin.isoformat(),
+            "event": event_name, "origin_date": origin.isoformat() if origin else "",
             "target_text": target_text, "target_start": parsed.start.isoformat() if parsed.start else "",
             "target_end": parsed.end.isoformat() if parsed.end else "", "precision": parsed.precision,
             "window_bucket": bucket(parsed), "probability": priority,
@@ -357,10 +327,10 @@ def normalize_nonfin(folder: Path) -> list[dict]:
     return rows
 
 
-def markdown_report(df: pd.DataFrame, unresolved: pd.DataFrame, start: date, end: date, folders: dict[str, Path]) -> str:
+def markdown_report(df: pd.DataFrame, unresolved: pd.DataFrame, start: date, end: date, source_path: Path) -> str:
     lines = [
         f"# 催化时间轴：{start.isoformat()} 至 {end.isoformat()}", "",
-        f"> 数据版本：科技 `{folders['tech'].name}`；非科技 `{folders['nonfin'].name}`。", "",
+        f"> 数据源：SQLite唯一主库 `{source_path}`；首次提出日无可靠字段时留空。", "",
         "> 评分只用于整理优先级，不构成投资建议；远期窗口精度越低，越应以里程碑验证替代具体日期。", "",
         "## 总览", "",
         f"- 窗口内记录：{len(df)}条（科技{int((df['source']=='tech').sum())}条，非科技{int((df['source']=='nonfin').sum())}条）",
@@ -402,12 +372,12 @@ def main() -> None:
     if end < start:
         raise SystemExit("--end 不能早于 --start")
 
-    folders = {"tech": latest_dir("tech"), "nonfin": latest_dir("nonfin")}
+    store = EventStore(EVENT_DB)
     rows: list[dict] = []
     if args.source in ("all", "tech"):
-        rows.extend(normalize_tech(folders["tech"]))
+        rows.extend(normalize_tech(store))
     if args.source in ("all", "nonfin"):
-        rows.extend(normalize_nonfin(folders["nonfin"]))
+        rows.extend(normalize_nonfin(store))
 
     all_df = pd.DataFrame(rows)
     parsed_mask = all_df["target_start"].ne("") & all_df["target_end"].ne("")
@@ -425,7 +395,7 @@ def main() -> None:
     selected.to_csv(out / "catalyst_timeline.csv", index=False, encoding="utf-8-sig")
     unresolved.to_csv(out / "unresolved.csv", index=False, encoding="utf-8-sig")
     (out / "report.md").write_text(
-        markdown_report(selected, unresolved, start, end, folders), encoding="utf-8"
+        markdown_report(selected, unresolved, start, end, store.db_path), encoding="utf-8"
     )
     print(f"已生成: {out / 'report.md'}")
     print(f"窗口内: {len(selected)} 条；时间待人工解析: {len(unresolved)} 条")

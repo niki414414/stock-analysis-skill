@@ -219,6 +219,7 @@ def build_holding_review_queue(
     risk_contraction = float(
         state.get("breadth_today", {}).get("advance_pct") or 0
     ) <= 35
+    market_date = str(state.get("breadth_today", {}).get("trade_date") or "")
     queue = []
     for row in holdings:
         shares_text = str(row.get("shares", "")).strip()
@@ -229,6 +230,8 @@ def build_holding_review_queue(
         if shares == 0:
             continue
         identity = str(row.get("role", "")).strip() or "unclassified"
+        recorded_date = str(row.get("last_updated", "")).strip().replace("-", "")
+        confirmation_required = not market_date or recorded_date != market_date
         quote = (market_data or {}).get(str(row.get("code", "")).strip(), {})
         try:
             cost = float(row.get("cost")) if str(row.get("cost", "")).strip() else None
@@ -237,7 +240,7 @@ def build_holding_review_queue(
         latest = quote.get("latest_price")
         pnl_pct = (
             round((latest / cost - 1) * 100, 1)
-            if isinstance(latest, (int, float)) and cost and cost > 0 else None
+            if not confirmation_required and isinstance(latest, (int, float)) and cost and cost > 0 else None
         )
         if quote.get("status") == "ok":
             trend_brief = (
@@ -250,6 +253,8 @@ def build_holding_review_queue(
             "account": row.get("account"), "code": row.get("code"),
             "name": row.get("name"), "asset_type": row.get("asset_type"),
             "shares": shares, "cost": cost,
+            "position_recorded_at": row.get("last_updated"),
+            "position_confirmation_required": confirmation_required,
             "market_data": {
                 "trade_date": quote.get("trade_date"),
                 "latest_price": latest, "pct_today": quote.get("pct_today"),
@@ -273,7 +278,11 @@ def build_holding_review_queue(
                 if identity == "unclassified" else
                 "固定原策略身份，禁止因盈亏临时转换"
             ),
-            "action_boundary": "本编排器不生成个股买卖价，须由对应持仓分析完成",
+            "action_boundary": (
+                "持仓数量和成本尚未核对至本次行情日；只作研究队列，不给个性化仓位或盈亏动作"
+                if confirmation_required else
+                "本编排器不生成个股买卖价，须由对应持仓分析完成"
+            ),
         })
     return queue
 
@@ -596,6 +605,8 @@ def compose_review(
         name: build_structure_decision_card(snapshot)
         for name, snapshot in structures_v2.items() if snapshot
     }
+    holding_queue = build_holding_review_queue(holdings or [], state, holding_market_data)
+    unconfirmed_holdings = [row for row in holding_queue if row["position_confirmation_required"]]
     return {
         "schema_version": "1.0",
         "generated_at": datetime.now().isoformat(),
@@ -633,9 +644,15 @@ def compose_review(
         },
         "decision_routes": {
             "strategy_guidance": strategy_guidance(state, {**radar, "sector_views": views}),
-            "holding_review_queue": build_holding_review_queue(
-                holdings or [], state, holding_market_data
-            ),
+            "holding_review_queue": holding_queue,
+            "personal_data_gate": {
+                "status": "confirmation_required" if unconfirmed_holdings else "current_or_not_applicable",
+                "holding_based_actions_allowed": not bool(unconfirmed_holdings),
+                "personalized_sizing_allowed": False,
+                "profile_not_checked": True,
+                "unconfirmed_positions": [row["code"] for row in unconfirmed_holdings],
+                "rule": "旧持仓仍可用于研究提醒；未经本次行情日确认，不据此给持仓盈亏动作；本编排器不核对画像或给个性化仓位",
+            },
             "next_steps": [
                 "按strategy_guidance选择要运行的现有扫描器，不运行关闭的策略",
                 "将holding_review_queue逐项交给对应持仓分析，不用板块强弱代替个股结论",

@@ -12,6 +12,23 @@ spec.loader.exec_module(review)
 
 
 class MarketDailyReviewTests(unittest.TestCase):
+    def test_old_holdings_require_confirmation_before_personalized_action(self):
+        state = {"breadth_today": {"trade_date": "20260924", "advance_pct": 50}}
+        holdings = [{
+            "account": "A", "code": "601138", "name": "工业富联",
+            "asset_type": "stock", "shares": "300", "cost": "50",
+            "role": "底仓", "last_updated": "2026-08-20",
+        }]
+        quote = {"601138": {"status": "ok", "trade_date": "20260924", "latest_price": 55}}
+        queue = review.build_holding_review_queue(holdings, state, quote)
+        self.assertTrue(queue[0]["position_confirmation_required"])
+        self.assertIsNone(queue[0]["market_data"]["pnl_pct_vs_cost"])
+        self.assertIn("不", queue[0]["action_boundary"])
+        holdings[0]["last_updated"] = "2026-09-24"
+        confirmed = review.build_holding_review_queue(holdings, state, quote)[0]
+        self.assertFalse(confirmed["position_confirmation_required"])
+        self.assertEqual(confirmed["market_data"]["pnl_pct_vs_cost"], 10.0)
+
     def test_compose_keeps_three_views_separate_and_checks_dates(self):
         state = {
             "breadth_today": {"trade_date": "20260812", "advance_pct": 76.3},
@@ -151,7 +168,7 @@ class MarketDailyReviewTests(unittest.TestCase):
         holdings = [{
             "account": "A", "code": "601138", "name": "工业富联",
             "asset_type": "stock", "shares": "300", "cost": "50",
-            "role": "底仓",
+            "role": "底仓", "last_updated": "2026-08-12",
         }]
         result = review.compose_review(state, radar, holdings, {
             "601138": {
@@ -171,6 +188,8 @@ class MarketDailyReviewTests(unittest.TestCase):
             ["创新药"],
         )
         self.assertTrue(routes["strategy_guidance"]["no_cross_strategy_ranking"])
+        self.assertTrue(routes["personal_data_gate"]["holding_based_actions_allowed"])
+        self.assertFalse(routes["personal_data_gate"]["personalized_sizing_allowed"])
         self.assertEqual(routes["holding_review_queue"][0]["strategy_identity"], "底仓")
         self.assertEqual(
             routes["holding_review_queue"][0]["market_data"]["pnl_pct_vs_cost"],
