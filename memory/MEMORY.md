@@ -1,5 +1,9 @@
 # Memory Index
 
+- [个人投资辅助闭环目标与验收](../INVESTMENT_WORKFLOW.md) — 2026-09-22：交互简单、输出深入；箱体—板块—事件—个股—买卖条件—结果复核；六项修复及整体迭代主线，后续修改先读
+
+- [事件库细分主题召回修复（2026-09-09完成）](project-event-context-subtopic-filter-20260909.md) — AI安全真实案例暴露expanded_fields过度召回；已完成直接证据、上级背景、公司文字点名分层，并通过AI安全/MLCC/乳制品三案例回归
+- [工具迭代必须以真实任务结果为中心](feedback_outcome_first_tool_iteration.md) — 过去一个月事件库改造反复无效的根因；强制真实案例先行、能力边界核对、缺口分类、最小改动和同案例复验，禁止围绕用户例子见子打子
 - [股票系统分层边界](feedback_stock_system_layer_boundary.md) — 所有股票相关修改必须放回“材料→事件→召回→六层→决策”全链路判断；事件库不复制个股兑现和交易分析
 - [均衡市场机会发现层P0（2026-07-29）](project-balanced-opportunity-p0-20260729.md) — 大盘→板块证据→质量/催化/市场响应候选→六层入口；Tushare日期感知资金与真实验收
 - [Market Outlook 2.0（2026-07-28）](project-market-outlook-v2-20260728.md) — 异常原因核验、非科技轮动雷达、影子回测边界及已知限制

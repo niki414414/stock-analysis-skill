@@ -832,6 +832,231 @@ def diagnose_abnormal_structure(state: Optional[dict]) -> dict:
     }
 
 
+def classify_market_environment(state: Optional[dict]) -> dict:
+    """Describe the market backdrop before interpreting sector strength."""
+    state = state or {}
+    advance = float(
+        state.get("breadth_today", {}).get("advance_pct") or 0
+    )
+    turnover_change = float(
+        state.get("total_turnover", {}).get("chg_vs_avg_pct") or 0
+    )
+    if advance >= 65 and turnover_change >= 0:
+        label = "incremental_broad_rally"
+    elif advance >= 65:
+        label = "broad_rebound_without_increment"
+    elif advance <= 35:
+        label = "risk_contraction"
+    else:
+        label = "rotation_or_mixed"
+    return {
+        "label": label,
+        "advance_pct": round(advance, 1),
+        "turnover_change_vs_average_pct": round(turnover_change, 1),
+        "interpretation_rule": (
+            "普涨环境降低单日绝对广度的解释权；以相对全市场广度判断独立强势"
+            if advance >= 65 else
+            "使用相对强弱、扩散和持续性共同判断，不用单日涨幅代替趋势"
+        ),
+    }
+
+
+def build_sector_views(
+    *,
+    opportunity_map: list[dict],
+    state: Optional[dict],
+    limit: int = 10,
+) -> dict:
+    """Separate trend, same-day rotation and catalyst preheat observations.
+
+    This deliberately uses categorical gates and explicit sort keys rather
+    than a composite score. The legacy opportunity map remains available for
+    compatibility but is not a trend ranking.
+    """
+    state = state or {}
+    csi = state.get("style_index_comparison", {}).get("沪深300", {})
+    benchmark = {
+        "today": float(csi.get("pct_today") or 0),
+        "5d": float(csi.get("pct_5d") or 0),
+        "20d": float(csi.get("pct_20d") or 0),
+    }
+
+    trend_rows = []
+    baskets = (
+        state.get("subsector_basket_momentum", {}).get("baskets", []) or []
+    )
+    for row in baskets:
+        if row.get("pct_5d") is None or row.get("pct_20d") is None:
+            continue
+        excess_5d = round(float(row["pct_5d"]) - benchmark["5d"], 2)
+        excess_20d = round(float(row["pct_20d"]) - benchmark["20d"], 2)
+        persistent = excess_5d >= 2 and excess_20d > 0
+        breadth_confirmed = (
+            int(row.get("n_stocks") or 0) >= 5
+            and
+            row.get("advance_ratio_5d") is not None
+            and float(row["advance_ratio_5d"]) >= 60
+            and row.get("median_5d") is not None
+            and float(row["median_5d"]) > 0
+        )
+        if not persistent:
+            continue
+        today_excess = round(
+            float(row.get("pct_today") or 0) - benchmark["today"], 2
+        )
+        if today_excess < -1:
+            stage = "high_level_divergence"
+        elif breadth_confirmed:
+            stage = "trend_strengthening"
+        else:
+            stage = "trend_continuation_unconfirmed_breadth"
+        confidence = row.get("coverage_confidence") or (
+            "normal" if int(row.get("n_stocks") or 0) >= 8 else "low"
+        )
+        core = row.get("event_core") or {}
+        core_5d = core.get("pct_5d")
+        panorama_5d = row.get("pct_5d")
+        if core_5d is None:
+            alignment = "external_panorama_only"
+        elif float(core_5d) > 0 and float(panorama_5d) > 0:
+            alignment = "core_and_panorama_aligned"
+        elif float(core_5d) > 0:
+            alignment = "core_only_leadership"
+        elif float(panorama_5d) > 0:
+            alignment = "panorama_only_rotation"
+        else:
+            alignment = "both_weak"
+        trend_rows.append({
+            "sector_id": row.get("sector_id"),
+            "sector": row.get("sub_sector") or row.get("sector_id"),
+            "view": "trend",
+            "stage": stage,
+            "n_stocks": row.get("n_stocks"),
+            "coverage_confidence": confidence,
+            "evidence": {
+                "pct_today": row.get("pct_today"),
+                "pct_5d": row.get("pct_5d"),
+                "pct_20d": row.get("pct_20d"),
+                "excess_5d_vs_csi300": excess_5d,
+                "excess_20d_vs_csi300": excess_20d,
+                "median_5d": row.get("median_5d"),
+                "advance_ratio_5d": row.get("advance_ratio_5d"),
+                "breadth_confirmed": breadth_confirmed,
+                "event_core_pct_5d": core_5d,
+                "core_panorama_alignment": alignment,
+            },
+            "warning": (
+                "样本少于5只，只能视为代表股线索，不能直接代表板块"
+                if confidence == "low" else None
+            ),
+        })
+    trend_rows.sort(key=lambda row: (
+        row["evidence"]["excess_5d_vs_csi300"],
+        row["evidence"]["excess_20d_vs_csi300"],
+        row["stage"] == "trend_strengthening",
+        row.get("n_stocks") or 0,
+    ), reverse=True)
+
+    rotation_rows = []
+    preheat_rows = []
+    for row in opportunity_map:
+        evidence = row["evidence"]
+        relative_breadth = evidence.get("gates", {}).get(
+            "relative_breadth", False
+        )
+        day_strength = float(evidence["excess_today_vs_csi300"]) >= 2
+        if day_strength or relative_breadth:
+            rotation_rows.append({
+                "sector": row["sector"],
+                "view": "rotation",
+                "stage": (
+                    "day_attack_with_diffusion"
+                    if day_strength and relative_breadth else
+                    "day_attack_unconfirmed"
+                ),
+                "evidence": evidence,
+                "interpretation": "当日轮动观察，不等于未来一周趋势",
+            })
+        trend_confirmed = (
+            float(evidence["excess_5d_vs_csi300"]) >= 2
+            and float(evidence["excess_20d_vs_csi300"]) > 0
+        )
+        if evidence.get("active_catalyst") and not trend_confirmed:
+            preheat_rows.append({
+                "sector": row["sector"],
+                "view": "event_preheat",
+                "stage": "catalyst_waiting_for_price_confirmation",
+                "evidence": evidence,
+                "active_events": row.get("active_events", []),
+                "interpretation": "只进入观察池，价格与扩散确认前不升级",
+            })
+    # The thematic basket layer can discover market-led preheat before a
+    # sector reaches the existing 5d/20d trend thresholds.  These rows share
+    # the same table as event-led preheat, but explicitly require a catalyst
+    # lookup before they can enter the catalyst-wave candidate pool.
+    existing_preheat = {row["sector"] for row in preheat_rows}
+    for row in baskets:
+        sector = row.get("sub_sector") or row.get("sector_id")
+        features = row.get("preheat_features") or {}
+        if not sector or sector in existing_preheat:
+            continue
+        if features.get("state") not in {"early_improvement", "market_testing"}:
+            continue
+        if row.get("pct_5d") is None or row.get("pct_20d") is None:
+            continue
+        excess_5d = round(float(row["pct_5d"]) - benchmark["5d"], 2)
+        excess_20d = round(float(row["pct_20d"]) - benchmark["20d"], 2)
+        if excess_5d >= 2 and excess_20d > 0:
+            continue
+        preheat_rows.append({
+            "sector_id": row.get("sector_id"),
+            "sector": sector,
+            "view": "event_preheat",
+            "discovery_source": "market_preheat_features",
+            "stage": (
+                "market_testing_requires_catalyst_lookup"
+                if features.get("state") == "market_testing"
+                else "early_market_improvement"
+            ),
+            "evidence": {
+                "pct_today": row.get("pct_today"),
+                "pct_5d": row.get("pct_5d"),
+                "pct_20d": row.get("pct_20d"),
+                "excess_5d_vs_csi300": excess_5d,
+                "excess_20d_vs_csi300": excess_20d,
+                "preheat_features": features,
+            },
+            "active_events": [],
+            "interpretation": (
+                "盘面出现前期痕迹；反查有效催化后才可进入催化波段候选"
+            ),
+        })
+    rotation_rows.sort(key=lambda row: (
+        row["stage"] == "day_attack_with_diffusion",
+        row["evidence"]["excess_today_vs_csi300"],
+        row["evidence"].get("advance_excess_vs_market", 0),
+    ), reverse=True)
+    preheat_rows.sort(key=lambda row: (
+        (row.get("evidence", {}).get("preheat_features") or {}).get(
+            "signal_count", 0
+        ),
+        len(row.get("active_events", [])),
+        row["evidence"].get("excess_5d_vs_csi300", -999),
+    ), reverse=True)
+    return {
+        "trend_watch": trend_rows[:limit],
+        "rotation_watch": rotation_rows[:limit],
+        "event_preheat_watch": preheat_rows[:limit],
+        "rules": {
+            "no_unified_ranking": True,
+            "trend_is_not_buy_signal": True,
+            "rotation_is_not_weekly_forecast": True,
+            "event_requires_market_confirmation": True,
+            "market_preheat_requires_catalyst_lookup_for_wave": True,
+        },
+    }
+
+
 def build_radar(
     state: Optional[dict], top: int, company_source: str = "sqlite"
 ) -> dict:
@@ -855,6 +1080,9 @@ def build_radar(
         pool=pool,
         code_map=code_map,
         company_store=company_store,
+    )
+    sector_views = build_sector_views(
+        opportunity_map=opportunity_map, state=state, limit=max(1, top)
     )
 
     selected = []
@@ -902,6 +1130,8 @@ def build_radar(
         "version": "2.0",
         "trade_date": trade_date,
         "abnormal_structure": diagnose_abnormal_structure(state),
+        "market_environment": classify_market_environment(state),
+        "sector_views": sector_views,
         "rotation_candidates": selected,
         "sector_opportunity_map": opportunity_map,
         "opportunity_snapshot_meta": opportunity_meta,
@@ -930,6 +1160,9 @@ def build_radar(
             "sector_opportunity_map中的科技催化仍由正式工作流STEP 4核验",
             "大单/特大单只代表订单规模代理，不能识别真实机构身份",
             "质量池是候选标签，不是全市场股票宇宙，也不产生买入结论",
+            "sector_opportunity_map为兼容输出，不是统一强弱榜；正式解读使用sector_views",
+            "细分篮子少于5只时仅代表核心样本，不得外推为完整板块趋势",
+            "细分篮子已接入成交额相对20日均值，但尚未接入创新高家数",
         ],
     }
 

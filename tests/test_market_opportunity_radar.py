@@ -20,6 +20,37 @@ spec.loader.exec_module(radar)
 
 
 class MarketOpportunityRadarTests(unittest.TestCase):
+    def test_market_preheat_basket_enters_existing_preheat_view(self):
+        state = {
+            "style_index_comparison": {
+                "沪深300": {"pct_today": 0, "pct_5d": 2, "pct_20d": 4}
+            },
+            "subsector_basket_momentum": {"baskets": [{
+                "sector_id": "power_dc",
+                "sub_sector": "800VDC",
+                "n_stocks": 8,
+                "pct_today": 0.8,
+                "pct_5d": 1.0,
+                "pct_20d": 2.0,
+                "preheat_features": {
+                    "state": "market_testing",
+                    "signal_count": 3,
+                    "signals": [
+                        "relative_resilience",
+                        "relative_strength_acceleration",
+                        "leader_ladder",
+                    ],
+                },
+            }]},
+        }
+        views = radar.build_sector_views(
+            opportunity_map=[], state=state, limit=10
+        )
+        row = views["event_preheat_watch"][0]
+        self.assertEqual(row["sector"], "800VDC")
+        self.assertEqual(row["discovery_source"], "market_preheat_features")
+        self.assertIn("催化", row["interpretation"])
+
     def test_normalize_code_preserves_leading_zero(self):
         self.assertEqual(radar.normalize_code("2602"), "002602")
         self.assertEqual(radar.normalize_code(2028.0), "002028")
@@ -230,6 +261,100 @@ class MarketOpportunityRadarTests(unittest.TestCase):
             rows[0]["tags"], ["market_response", "quality_core"]
         )
         self.assertEqual(rows[0]["next_action"], "six_layer_priority")
+
+    def test_sector_views_keep_trend_and_rotation_separate(self):
+        state = {
+            "style_index_comparison": {
+                "沪深300": {"pct_today": 0.5, "pct_5d": 1.0, "pct_20d": 2.0}
+            },
+            "subsector_basket_momentum": {"baskets": [{
+                "sector_id": "DRUG", "sub_sector": "创新药", "n_stocks": 12,
+                "coverage_confidence": "normal", "pct_today": -0.2,
+                "pct_5d": 8.0, "pct_20d": 12.0, "median_5d": 5.0,
+                "advance_ratio_5d": 75.0,
+            }]},
+        }
+        opportunity = [{
+            "sector": "房地产", "active_events": [],
+            "evidence": {
+                "excess_today_vs_csi300": 3.0,
+                "excess_5d_vs_csi300": 1.0,
+                "excess_20d_vs_csi300": -2.0,
+                "advance_excess_vs_market": 15.0,
+                "active_catalyst": False,
+                "gates": {"relative_breadth": True},
+            },
+        }]
+        views = radar.build_sector_views(
+            opportunity_map=opportunity, state=state
+        )
+        self.assertEqual(views["trend_watch"][0]["sector"], "创新药")
+        self.assertEqual(views["rotation_watch"][0]["sector"], "房地产")
+        self.assertNotIn("房地产", [r["sector"] for r in views["trend_watch"]])
+
+    def test_low_coverage_trend_has_explicit_warning(self):
+        state = {
+            "style_index_comparison": {"沪深300": {
+                "pct_today": 0, "pct_5d": 0, "pct_20d": 0,
+            }},
+            "subsector_basket_momentum": {"baskets": [{
+                "sector_id": "DRUG", "sub_sector": "创新药", "n_stocks": 2,
+                "coverage_confidence": "low", "pct_today": 1,
+                "pct_5d": 8, "pct_20d": 11, "median_5d": 8,
+                "advance_ratio_5d": 100,
+            }]},
+        }
+        row = radar.build_sector_views(
+            opportunity_map=[], state=state
+        )["trend_watch"][0]
+        self.assertIn("少于5只", row["warning"])
+
+    def test_low_coverage_warns_but_does_not_hide_strong_signal(self):
+        state = {
+            "style_index_comparison": {"沪深300": {
+                "pct_today": 0, "pct_5d": 1, "pct_20d": 2,
+            }},
+            "subsector_basket_momentum": {"baskets": [
+                {
+                    "sector_id": "DRUG", "sub_sector": "创新药",
+                    "n_stocks": 2, "coverage_confidence": "low",
+                    "pct_today": 0, "pct_5d": 9, "pct_20d": 13,
+                    "median_5d": 8, "advance_ratio_5d": 100,
+                },
+                {
+                    "sector_id": "OTHER", "sub_sector": "普通趋势",
+                    "n_stocks": 12, "coverage_confidence": "normal",
+                    "pct_today": 0, "pct_5d": 4, "pct_20d": 8,
+                    "median_5d": 2, "advance_ratio_5d": 70,
+                },
+            ]},
+        }
+        rows = radar.build_sector_views(
+            opportunity_map=[], state=state
+        )["trend_watch"]
+        self.assertEqual(rows[0]["sector"], "创新药")
+        self.assertEqual(rows[0]["coverage_confidence"], "low")
+
+    def test_trend_view_exposes_core_panorama_divergence(self):
+        state = {
+            "style_index_comparison": {"沪深300": {
+                "pct_today": 0, "pct_5d": 0, "pct_20d": 0,
+            }},
+            "subsector_basket_momentum": {"baskets": [{
+                "sector_id": "X", "sub_sector": "测试板块", "n_stocks": 10,
+                "coverage_confidence": "normal", "pct_today": 1,
+                "pct_5d": 5, "pct_20d": 6, "median_5d": 3,
+                "advance_ratio_5d": 70,
+                "event_core": {"n_stocks": 2, "pct_5d": -1},
+            }]},
+        }
+        row = radar.build_sector_views(
+            opportunity_map=[], state=state
+        )["trend_watch"][0]
+        self.assertEqual(
+            row["evidence"]["core_panorama_alignment"],
+            "panorama_only_rotation",
+        )
 
 
 if __name__ == "__main__":

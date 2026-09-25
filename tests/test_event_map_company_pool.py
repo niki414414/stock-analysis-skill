@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -138,3 +139,17 @@ def test_scanner_reads_company_relations_from_sqlite(tmp_path, monkeypatch):
     assert result.iloc[0]["code"] == "300001"
     assert result.iloc[0]["company_source"] == "sqlite"
     assert result.iloc[0]["benefit_tier"] == "明确映射"
+
+
+def test_scanner_sqlite_failure_never_uses_excel_implicitly(monkeypatch):
+    scanner = load_module(
+        "catalyst_scanner_no_implicit_excel_test",
+        ROOT / "skills/top-picks/references/catalyst_left_side_scanner.py",
+    )
+    def fail_sqlite(_):
+        raise RuntimeError("主库不可读")
+    monkeypatch.setattr(scanner, "_load_company_candidates_sqlite", fail_sqlite)
+    monkeypatch.setattr(scanner, "_load_company_candidates_excel",
+                        lambda _: pytest.fail("不应自动读取旧Excel"))
+    with pytest.raises(RuntimeError, match="主库不可读"):
+        scanner.load_company_candidates(pd.DataFrame([{"事件ID": "EVT-1"}]))

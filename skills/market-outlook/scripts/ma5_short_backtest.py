@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""MA5稳升短线策略的事件回测。
+"""推土机短线策略的日线代理回测。
 
 信号在T日收盘后确认；T+1仅当开盘接近平开且位于次日MA5临界价上方
-指定区间时成交。分别统计T+1、T+2收盘收益和期间最大有利/不利波动。
+指定区间时成交。T+1收盘只作为买入当日盯市值；遵守A股T+1后，
+最早可执行退出为T+2开盘或其后。竞价预埋成交需要独立竞价数据验证。
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ SCANNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SCANNER)
 
 
-def fetch_history(pro, start: str, end: str, cache_dir: Path, warmup_days: int = 45) -> pd.DataFrame:
+def fetch_history(pro, start: str, end: str, cache_dir: Path, warmup_days: int = 100) -> pd.DataFrame:
     fetch_start = (pd.Timestamp(start) - pd.Timedelta(days=warmup_days)).strftime("%Y%m%d")
     calendar = pro.trade_cal(exchange="SSE", start_date=fetch_start, end_date=end, fields="cal_date,is_open")
     dates = sorted(calendar.loc[calendar["is_open"].eq(1), "cal_date"].astype(str))
@@ -53,6 +54,7 @@ def simulate_stock(
     gap_low: float = -0.01,
     gap_high: float = 0.01,
     threshold_premium: float = 0.01,
+    meta: dict | None = None,
 ) -> list[dict]:
     bars = SCANNER.prepare_bars(frame)
     rows = []
@@ -63,17 +65,17 @@ def simulate_stock(
         if signal_date < start or signal_date > end:
             continue
         history = bars.iloc[: i + 1]
-        tail5, tail10 = history.tail(5), history.tail(10)
-        signal = bool(
-            (tail5["adj_close"] > tail5["ma5"]).all()
-            and (tail5["ma5"].diff().dropna() >= 0).all()
-            and tail10["limit_up"].any()
-        )
-        if not signal:
+        identity = {
+            "ts_code": str(frame.iloc[0].get("ts_code", "")),
+            "name": (meta or {}).get("name", ""),
+            "industry": (meta or {}).get("industry", ""),
+        }
+        candidate = SCANNER.analyze_stock(history, identity)
+        if candidate is None:
             continue
         entry = bars.iloc[i + 1]
         exit2 = bars.iloc[i + 2]
-        threshold = history.tail(4)["adj_close"].mean() / history.iloc[-1]["adj_factor"]
+        threshold = float(candidate["next_ma5_threshold"])
         gap = entry["open"] / entry["pre_close"] - 1
         premium = entry["open"] / threshold - 1
         executable = gap_low <= gap <= gap_high and 0 <= premium <= threshold_premium
@@ -85,10 +87,23 @@ def simulate_stock(
             "open_gap_pct": round(float(gap * 100), 3),
             "threshold_premium_pct": round(float(premium * 100), 3),
             "executable": bool(executable),
+            "signal": candidate["signal"],
+            "selection_lane": candidate["selection_lane"],
+            "full_ma_lane": candidate["full_ma_lane"],
+            "active_lane": candidate["active_lane"],
+            "shape_score": candidate["shape_score"],
+            "activity_score": candidate["activity_score"],
+            "sustained_strength": candidate["sustained_strength"],
+            "continuity_tier": candidate["continuity_tier"],
+            "risk_tier": candidate["risk_tier"],
         }
         if executable:
             price = float(entry["open"])
             row.update({
+                "same_day_mark_pct": round((float(entry["close"]) / price - 1) * 100, 3),
+                "next_day_open_exit_pct": round((float(exit2["open"]) / price - 1) * 100, 3),
+                "next_day_close_exit_pct": round((float(exit2["close"]) / price - 1) * 100, 3),
+                # Legacy aliases retained for old result readers.
                 "return_1d_pct": round((float(entry["close"]) / price - 1) * 100, 3),
                 "return_2d_pct": round((float(exit2["close"]) / price - 1) * 100, 3),
                 "mfe_1d_pct": round((float(entry["high"]) / price - 1) * 100, 3),
@@ -100,10 +115,25 @@ def simulate_stock(
     return rows
 
 
-def summarize(rows: pd.DataFrame) -> dict:
-    executed = rows[rows["executable"]].copy() if not rows.empty else rows
-    result = {"signals": int(len(rows)), "executed": int(len(executed))}
+def summarize(rows: pd.DataFrame, execution_column: str | None = None) -> dict:
+    column = execution_column or (
+        "executable_with_gate" if "executable_with_gate" in rows else "executable"
+    )
+    executed = rows[rows[column].fillna(False).astype(bool)].copy() if not rows.empty else rows
+    result = {"signals": int(len(rows)), "executed": int(len(executed)),
+              "execution_column": column, "return_basis": "gross_daily_bar_proxy"}
     result["execution_rate"] = round(len(executed) / len(rows), 4) if len(rows) else None
+    for key, column in (
+        ("same_day_mark", "same_day_mark_pct"),
+        ("next_day_open_exit", "next_day_open_exit_pct"),
+        ("next_day_close_exit", "next_day_close_exit_pct"),
+    ):
+        values = pd.to_numeric(executed.get(column), errors="coerce").dropna() if column in executed else pd.Series(dtype=float)
+        result[key] = {
+            "count": int(len(values)), "mean_pct": round(float(values.mean()), 3),
+            "median_pct": round(float(values.median()), 3),
+            "win_rate": round(float((values > 0).mean()), 4),
+        } if len(values) else {}
     for horizon in (1, 2):
         col = f"return_{horizon}d_pct"
         if executed.empty or col not in executed:
@@ -120,16 +150,34 @@ def summarize(rows: pd.DataFrame) -> dict:
     return result
 
 
+def market_limit_rate(ts_code: str) -> float:
+    """Board-aware regular price limit; historical ST/listing-day exceptions remain external."""
+    symbol = str(ts_code).split(".", 1)[0]
+    if symbol.startswith(("300", "301", "688", "689")):
+        return 0.20
+    if symbol.startswith(("4", "8", "92")):
+        return 0.30
+    return 0.10
+
+
 def compute_market_activity(bars: pd.DataFrame) -> pd.DataFrame:
     """仅用当日收盘后可见数据划分次日短线资金环境。"""
     frame = bars.copy()
     frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce")
     frame["raw_return"] = pd.to_numeric(frame["close"], errors="coerce") / pd.to_numeric(frame["pre_close"], errors="coerce") - 1
+    if "ts_code" not in frame:
+        frame["ts_code"] = "600000.SH"
+    frame["limit_rate"] = frame["ts_code"].map(market_limit_rate)
+    frame["is_limit_up"] = frame["raw_return"] >= frame["limit_rate"] - 0.005
+    frame["is_limit_down"] = frame["raw_return"] <= -frame["limit_rate"] + 0.005
     daily = frame.groupby("trade_date").agg(
         total_amount=("amount", "sum"),
-        limit_up_count=("raw_return", lambda values: int((values >= 0.095).sum())),
-        limit_down_count=("raw_return", lambda values: int((values <= -0.095).sum())),
+        advancers=("raw_return", lambda values: int((values > 0).sum())),
+        decliners=("raw_return", lambda values: int((values < 0).sum())),
+        limit_up_count=("is_limit_up", "sum"),
+        limit_down_count=("is_limit_down", "sum"),
     ).sort_index()
+    daily["advance_pct"] = daily["advancers"] / (daily["advancers"] + daily["decliners"]) * 100
     daily["amount_ma20"] = daily["total_amount"].rolling(20).mean()
     daily["turnover_ratio_20d"] = daily["total_amount"] / daily["amount_ma20"]
 
@@ -146,16 +194,19 @@ def compute_market_activity(bars: pd.DataFrame) -> pd.DataFrame:
         return "normal"
 
     daily["market_activity"] = daily.apply(classify, axis=1)
+    daily["pushdozer_gate"] = daily["limit_down_count"].map(
+        lambda count: "green" if count <= 10 else "yellow" if count < 20 else "red"
+    )
     return daily.reset_index()
 
 
 def attach_market_activity(rows: pd.DataFrame, activity: pd.DataFrame) -> pd.DataFrame:
     if rows.empty:
         return rows
-    fields = ["trade_date", "market_activity", "turnover_ratio_20d", "limit_up_count", "limit_down_count"]
+    fields = ["trade_date", "market_activity", "pushdozer_gate", "advance_pct", "turnover_ratio_20d", "limit_up_count", "limit_down_count"]
     lookup = activity[fields].rename(columns={"trade_date": "signal_date"})
     result = rows.merge(lookup, on="signal_date", how="left")
-    result["executable_with_gate"] = result["executable"] & result["market_activity"].isin(["active", "normal"])
+    result["executable_with_gate"] = result["executable"] & result["pushdozer_gate"].isin(["green", "yellow"])
     return result
 
 
@@ -171,13 +222,16 @@ def summarize_by_market_activity(rows: pd.DataFrame) -> dict:
 def write_markdown(summary: dict, path: Path) -> None:
     one, two = summary.get("holding_1d", {}), summary.get("holding_2d", {})
     lines = [
-        f"# MA5短线回测 {summary['start']}—{summary['end']}", "",
-        f"- 收盘信号：{summary['signals']}次；符合次日开盘规则：{summary['executed']}次；执行率：{summary['execution_rate']}",
-        f"- 持有1日：平均{one.get('mean_pct')}%，中位数{one.get('median_pct')}%，胜率{one.get('win_rate')}，平均MFE/MAE {one.get('mean_mfe_pct')}%/{one.get('mean_mae_pct')}%",
-        f"- 持有2日：平均{two.get('mean_pct')}%，中位数{two.get('median_pct')}%，胜率{two.get('win_rate')}，平均MFE/MAE {two.get('mean_mfe_pct')}%/{two.get('mean_mae_pct')}%",
+        f"# 推土机短线日线代理回测 {summary['start']}—{summary['end']}", "",
+        f"- 收盘信号：{summary['signals']}次；开盘条件及市场闸门通过：{summary['executed']}次；执行率：{summary['execution_rate']}",
+        f"- 未应用市场闸门的对照成交数：{summary.get('without_market_gate', {}).get('executed', '未提供')}",
+        "- 收益口径：未扣费日线代理，不是账户可实现净收益；红灯或闸门缺失不计入主结果。",
+        f"- 买入当日收盘盯市（不可执行退出）：{summary.get('same_day_mark', {})}",
+        f"- 下一交易日开盘退出代理：{summary.get('next_day_open_exit', {})}",
+        f"- 下一交易日收盘退出代理：{summary.get('next_day_close_exit', {})}",
         "", "## 按市场资金活跃度", "",
     ]
-    lines += ["|状态|可成交样本|持有1日均值|持有1日胜率|持有2日均值|持有2日胜率|", "|---|---:|---:|---:|---:|---:|"]
+    lines += ["|状态|闸门通过样本|买入当日盯市均值（不可卖）|当日盯市胜率|次日收盘退出均值|次日收盘退出胜率|", "|---|---:|---:|---:|---:|---:|"]
     for state, stats in summary.get("by_market_activity", {}).items():
         h1, h2 = stats.get("holding_1d", {}), stats.get("holding_2d", {})
         lines.append(f"|{state}|{stats.get('executed')}|{h1.get('mean_pct')}%|{h1.get('win_rate')}|{h2.get('mean_pct')}%|{h2.get('win_rate')}|")
@@ -192,9 +246,15 @@ def run_backtest(bars: pd.DataFrame, basics: pd.DataFrame, start: str, end: str,
     rows = []
     for code, frame in bars[bars["ts_code"].isin(codes)].groupby("ts_code", sort=False):
         meta = eligible[eligible["ts_code"] == code].iloc[0]
-        for row in simulate_stock(frame, start, end, **kwargs):
+        for row in simulate_stock(frame, start, end, meta=meta.to_dict(), **kwargs):
             rows.append({"name": meta.get("name"), "industry": meta.get("industry"), **row})
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+    selected_days = []
+    for _, group in result.groupby("signal_date", sort=True):
+        selected_days.append(SCANNER.select_dual_lane(group, per_lane=5, total=10))
+    return pd.concat(selected_days, ignore_index=True)
 
 
 def main() -> None:
@@ -211,7 +271,7 @@ def main() -> None:
     token = os.environ.get("TUSHARE_TOKEN")
     if not token:
         raise RuntimeError("TUSHARE_TOKEN未设置")
-    out_dir = args.output_dir or root / "分析记录" / "策略回测"
+    out_dir = args.output_dir or root / "技能数据" / "运行记录" / "策略回测"
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = root / "技能数据" / "market_history_cache"
     pro = ts.pro_api(token)
@@ -223,12 +283,13 @@ def main() -> None:
     )
     rows = attach_market_activity(rows, compute_market_activity(bars))
     summary = summarize(rows)
+    summary["without_market_gate"] = summarize(rows, execution_column="executable")
     summary["by_market_activity"] = summarize_by_market_activity(rows)
     summary.update({
         "start": args.start, "end": args.end,
         "entry_rule": {"gap_low": args.gap_low, "gap_high": args.gap_high, "threshold_premium": args.threshold_premium},
-        "market_gate": "active=成交额不低于20日均值且涨停不少于50；frozen=跌停不少于50，或成交额低于20日均值80%且涨停少于30；其他为normal",
-        "limitations": ["当前版本使用期末股票名称过滤ST，尚未重建逐日历史ST状态", "当前版本股票池存在一定生存者偏差", "收益未扣佣金、印花税和滑点", "涨跌停数量由日涨跌幅近似计算"],
+        "market_gate": "推土机：跌停≤10绿灯；11—19黄灯；≥20红灯。上涨占比只分环境，不作为机械买点",
+        "limitations": ["当前版本使用期末股票名称过滤ST，尚未重建逐日历史ST状态", "当前版本股票池存在一定生存者偏差", "收益未扣佣金、印花税和滑点", "涨跌停已按板块常规10%/20%/30%区分，但历史ST与上市初期无涨跌幅限制仍待重建", "无竞价逐笔数据，不能验证9:25前预埋是否成交；全天最低价不得替代竞价成交"],
     })
     stem = f"ma5_short_backtest_{args.start}_{args.end}"
     rows.to_csv(out_dir / f"{stem}.csv", index=False, encoding="utf-8-sig")

@@ -19,6 +19,7 @@ import json
 import argparse
 import warnings
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -29,6 +30,13 @@ WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
 ))
 REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
 STOCK_SKILL_DIR = os.path.join(REPO_ROOT, "skills", "stock-analysis")
+EXTERNAL_BASKET_SUPPLEMENT = os.path.join(
+    REPO_ROOT, "skills", "market-outlook", "config",
+    "subsector_basket_supplement.csv",
+)
+STRUCTURE_V2_VERSION_LOG = os.path.join(
+    WORKSPACE_ROOT, "技能数据", "运行记录", "市场结构V2版本.jsonl"
+)
 sys.path.insert(0, os.path.join(STOCK_SKILL_DIR, "references"))
 from stock_data_fetcher import (  # noqa: E402
     fetch_market_breadth,
@@ -38,7 +46,11 @@ from stock_data_fetcher import (  # noqa: E402
     _log,
 )
 sys.path.insert(0, os.path.join(STOCK_SKILL_DIR, "scripts"))
-from event_map_query import find_latest_csv_dir, load_csv  # noqa: E402
+from event_map_query import query_status  # noqa: E402
+sys.path.insert(0, REPO_ROOT)
+from skills.shared.sector_preheat import build_sector_preheat_features  # noqa: E402
+sys.path.insert(0, os.path.join(REPO_ROOT, "skills", "market-outlook", "scripts"))
+from market_structure_v2 import build_market_structure_v2  # noqa: E402
 
 # 2026-07-22新增：市场级复盘专用的宏观避险篮子，跟事件地图/公司池完全独立维护——
 # 贵金属这类避险资金流向不是科技/新兴产业催化驱动，事件地图从建库起就没有覆盖，
@@ -241,7 +253,36 @@ TECHNICAL_LEVEL_INDICES = {
 }
 
 
-def fetch_index_technical_levels(pro) -> dict:
+def _load_previous_structure_v2(
+    index_name: str, latest_trade_date: str,
+    path: str = STRUCTURE_V2_VERSION_LOG,
+) -> dict:
+    """Read the latest persisted snapshot visible at the requested date."""
+    target = Path(path)
+    if not target.exists():
+        return None
+    candidates = []
+    try:
+        for line in target.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if record.get("index_name") != index_name:
+                continue
+            if str(record.get("trade_date") or "") > str(latest_trade_date):
+                continue
+            snapshot = record.get("snapshot") or {}
+            if snapshot.get("mode") == "shadow":
+                candidates.append(record)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: str(row.get("as_of_timestamp") or ""))
+    return candidates[-1].get("snapshot")
+
+
+def fetch_index_technical_levels(pro, as_of_date: str = None) -> dict:
     """
     关键指数的均线位置 + 压力/支撑参考位。
 
@@ -254,7 +295,10 @@ def fetch_index_technical_levels(pro) -> dict:
     2026-07-21实测过一次排除最近5日的版本，跑出"支撑位比现价还高"的荒谬结果，
     已改成不排除，同时输出现价与该点位的相对位置（待突破/已突破/待考验/已跌破）。
     """
-    today = datetime.now()
+    today = (
+        datetime.strptime(as_of_date, "%Y%m%d")
+        if as_of_date else datetime.now()
+    )
     start = (today - timedelta(days=200)).strftime("%Y%m%d")
     end = today.strftime("%Y%m%d")
     out = {}
@@ -269,6 +313,20 @@ def fetch_index_technical_levels(pro) -> dict:
             highs = df["high"].tolist() if "high" in df.columns else closes
             lows = df["low"].tolist() if "low" in df.columns else closes
             current = closes[-1]
+
+            # ATR is used to turn single technical prices into practical
+            # zones.  A support/resistance level is never an exact point.
+            true_ranges = []
+            for idx in range(1, len(closes)):
+                true_ranges.append(max(
+                    float(highs[idx]) - float(lows[idx]),
+                    abs(float(highs[idx]) - float(closes[idx - 1])),
+                    abs(float(lows[idx]) - float(closes[idx - 1])),
+                ))
+            atr14 = (
+                sum(true_ranges[-14:]) / min(14, len(true_ranges))
+                if true_ranges else None
+            )
 
             ma = {}
             for n in [5, 10, 20, 60]:
@@ -290,6 +348,129 @@ def fetch_index_technical_levels(pro) -> dict:
             swing_short = _find_swing_origin(closes, dates, lookback=20)
             swing_long = _find_swing_origin(closes, dates, lookback=60)
 
+            # Use prior extremes (excluding the latest three bars) together
+            # with MA20/MA60 to estimate the nearest tradable interval.  The
+            # old rolling high/low fields remain for audit compatibility.
+            prior_end = max(1, len(closes) - 3)
+            upper_candidates = []
+            lower_candidates = []
+            for w in [20, 60, 120]:
+                start_idx = max(0, prior_end - w)
+                if prior_end > start_idx:
+                    upper_candidates.append(max(float(v) for v in highs[start_idx:prior_end]))
+                    lower_candidates.append(min(float(v) for v in lows[start_idx:prior_end]))
+            for value in (ma.get("MA20"), ma.get("MA60")):
+                if value is not None:
+                    upper_candidates.append(float(value))
+                    lower_candidates.append(float(value))
+            meaningful_gap = max((atr14 or 0) * 0.15, current * 0.001)
+            uppers = sorted({v for v in upper_candidates if v > current + meaningful_gap})
+            lowers = sorted({v for v in lower_candidates if v < current - meaningful_gap}, reverse=True)
+            nearest_upper = uppers[0] if uppers else current + 2 * (atr14 or current * 0.01)
+            nearest_lower = lowers[0] if lowers else current - 2 * (atr14 or current * 0.01)
+            second_upper = (
+                uppers[1] if len(uppers) > 1
+                else nearest_upper + 2 * (atr14 or current * 0.01)
+            )
+            second_lower = (
+                lowers[1] if len(lowers) > 1
+                else nearest_lower - 2 * (atr14 or current * 0.01)
+            )
+            half_zone = max((atr14 or current * 0.01) * 0.25, current * 0.0015)
+
+            # Recent realized five-session excursions explain whether a nearby
+            # technical level is likely to be tested. They are context, not a
+            # probability forecast or a replacement for support/resistance.
+            realized_up, realized_down = [], []
+            lookback_start = max(0, len(closes) - 45)
+            for origin in range(lookback_start, len(closes) - 5):
+                base = float(closes[origin])
+                if base <= 0:
+                    continue
+                realized_up.append(
+                    (max(float(v) for v in highs[origin + 1:origin + 6]) / base - 1) * 100
+                )
+                realized_down.append(
+                    (min(float(v) for v in lows[origin + 1:origin + 6]) / base - 1) * 100
+                )
+
+            def excursion_summary(values):
+                if not values:
+                    return {"median_pct": None, "p80_abs_pct": None, "samples": 0}
+                series = pd.Series(values, dtype=float)
+                return {
+                    "median_pct": round(float(series.median()), 2),
+                    "p80_abs_pct": round(float(series.abs().quantile(0.8)), 2),
+                    "samples": len(values),
+                }
+
+            def zone(level):
+                return {
+                    "lower": round(level - half_zone, 2),
+                    "upper": round(level + half_zone, 2),
+                    "mid": round(level, 2),
+                }
+            latest_high = float(highs[-1])
+            latest_low = float(lows[-1])
+            close_location = (
+                (current - latest_low) / (latest_high - latest_low)
+                if latest_high > latest_low else 0.5
+            )
+            touched_upper = latest_high >= nearest_upper - half_zone
+            if touched_upper and close_location <= 0.45:
+                structure = "触及压力区后回落"
+            elif current >= nearest_upper + half_zone:
+                structure = "已向上脱离原区间"
+            elif current <= nearest_lower - half_zone:
+                structure = "已向下跌破原区间"
+            elif ma.get("MA20") is not None and current >= ma["MA20"]:
+                structure = "区间内偏强运行"
+            else:
+                structure = "区间内偏弱运行"
+            range_outlook = {
+                "method": "两级技术路标+近期5日实际波动",
+                "current": round(float(current), 2),
+                "support_zone": zone(nearest_lower),
+                "resistance_zone": zone(nearest_upper),
+                "secondary_support_zone": zone(second_lower),
+                "secondary_resistance_zone": zone(second_upper),
+                "upside_to_resistance_pct": round((nearest_upper / current - 1) * 100, 2),
+                "downside_to_support_pct": round((nearest_lower / current - 1) * 100, 2),
+                "upside_to_secondary_resistance_pct": round((second_upper / current - 1) * 100, 2),
+                "downside_to_secondary_support_pct": round((second_lower / current - 1) * 100, 2),
+                "realized_5d_excursion": {
+                    "upside": excursion_summary(realized_up),
+                    "downside": excursion_summary(realized_down),
+                    "usage": "用于判断技术路标是否容易被测试，不是未来收益概率",
+                },
+                "atr14": round(atr14, 2) if atr14 is not None else None,
+                "close_location_in_day": round(close_location, 2),
+                "structure": structure,
+                "upside_confirmation": "收盘站上压力区上沿且成交额连续放大",
+                "downside_confirmation": "收盘跌破支撑区下沿且市场广度同步转弱",
+                "interpretation_boundary": "第一路标用于观察反应；穿越后转看第二路标，不把两者解释为保证止跌或见顶",
+            }
+
+            # V2 is shadow-only.  A malformed candidate calculation must not
+            # erase the stable V1 technical output for the same index.
+            structure_timestamp = datetime.now().astimezone().isoformat()
+            try:
+                market_structure_v2 = build_market_structure_v2(
+                    df, index_name=name,
+                    as_of_timestamp=structure_timestamp,
+                    previous_snapshot=_load_previous_structure_v2(
+                        name, str(df.iloc[-1]["trade_date"])
+                    ),
+                )
+            except Exception as structure_error:
+                market_structure_v2 = {
+                    "schema_version": "2.0-shadow.1",
+                    "mode": "shadow",
+                    "status": "error",
+                    "as_of_timestamp": structure_timestamp,
+                    "error": str(structure_error),
+                    "fallback": "V1 range_outlook remains authoritative",
+                }
             out[name] = {
                 "current": current,
                 **ma,
@@ -297,6 +478,8 @@ def fetch_index_technical_levels(pro) -> dict:
                 **support,
                 "swing_origin_近期(20日)": swing_short,
                 "swing_origin_更大级别(60日)": swing_long,
+                "range_outlook": range_outlook,
+                "market_structure_v2": market_structure_v2,
             }
         except Exception as e:
             out[name] = {"source": f"error: {e}"}
@@ -427,7 +610,7 @@ def _fetch_basket_returns(pro, codes: dict, trade_date: str) -> dict:
     for ts_code in codes:
         try:
             df = pro.daily(ts_code=ts_code, start_date=start_str, end_date=trade_date,
-                            fields="trade_date,close,pct_chg")
+                            fields="trade_date,close,pct_chg,amount")
             if df is None or df.empty:
                 continue
             df = df.sort_values("trade_date")
@@ -435,26 +618,184 @@ def _fetch_basket_returns(pro, codes: dict, trade_date: str) -> dict:
             pct_today = round(float(df["pct_chg"].iloc[-1]), 2)
             pct_5d = round((closes[-1] / closes[-5] - 1) * 100, 2) if len(closes) >= 5 else None
             pct_20d = round((closes[-1] / closes[-20] - 1) * 100, 2) if len(closes) >= 20 else None
-            out[ts_code] = {"pct_today": pct_today, "pct_5d": pct_5d, "pct_20d": pct_20d}
+            amounts = pd.to_numeric(df.get("amount"), errors="coerce").dropna()
+            prior_amounts = amounts.iloc[-21:-1] if len(amounts) >= 21 else amounts.iloc[:-1]
+            amount_ratio_20d = None
+            if len(amounts) and len(prior_amounts) and float(prior_amounts.mean()) > 0:
+                amount_ratio_20d = round(float(amounts.iloc[-1] / prior_amounts.mean()), 2)
+            out[ts_code] = {
+                "pct_today": pct_today, "pct_5d": pct_5d,
+                "pct_20d": pct_20d, "amount_ratio_20d": amount_ratio_20d,
+            }
         except Exception:
             continue
     return out
 
 
+def _fetch_basket_returns_bulk(pro, codes: set[str], trade_date: str) -> dict:
+    """Fetch basket history by trading day, avoiding one request per stock."""
+    end_dt = datetime.strptime(trade_date, "%Y%m%d")
+    start_str = (end_dt - timedelta(days=45)).strftime("%Y%m%d")
+    calendar = pro.trade_cal(
+        exchange="SSE", start_date=start_str, end_date=trade_date
+    )
+    open_days = sorted(
+        calendar.loc[calendar["is_open"] == 1, "cal_date"].astype(str)
+    )[-25:]
+    code_set = set(codes)
+    histories = {code: [] for code in code_set}
+    for day in open_days:
+        try:
+            frame = pro.daily(
+                trade_date=day,
+                fields="ts_code,trade_date,open,high,low,close,pct_chg,amount",
+            )
+        except Exception:
+            continue
+        if frame is None or frame.empty:
+            continue
+        subset = frame[frame["ts_code"].isin(code_set)]
+        for row in subset.to_dict("records"):
+            histories[row["ts_code"]].append(row)
+    out = {}
+    for code, rows in histories.items():
+        if not rows:
+            continue
+        frame = pd.DataFrame(rows).sort_values("trade_date")
+        closes = pd.to_numeric(frame["close"], errors="coerce").tolist()
+        amounts = pd.to_numeric(frame["amount"], errors="coerce").dropna()
+        prior_amounts = amounts.iloc[-21:-1] if len(amounts) >= 21 else amounts.iloc[:-1]
+        amount_ratio_20d = None
+        if len(amounts) and len(prior_amounts) and float(prior_amounts.mean()) > 0:
+            amount_ratio_20d = round(float(amounts.iloc[-1] / prior_amounts.mean()), 2)
+        history = []
+        prior_amount_mean = float(prior_amounts.mean()) if len(prior_amounts) else None
+        for record in frame.to_dict("records"):
+            amount = pd.to_numeric(record.get("amount"), errors="coerce")
+            close = float(record["close"])
+            history.append({
+                "trade_date": str(record["trade_date"]),
+                "open": float(record.get("open", close)),
+                "high": float(record.get("high", close)),
+                "low": float(record.get("low", close)),
+                "close": close,
+                "pct_chg": float(record["pct_chg"]),
+                "amount_ratio_20d": (
+                    round(float(amount) / prior_amount_mean, 2)
+                    if pd.notna(amount) and prior_amount_mean and prior_amount_mean > 0
+                    else None
+                ),
+            })
+        out[code] = {
+            "pct_today": round(float(frame["pct_chg"].iloc[-1]), 2),
+            "pct_5d": (
+                round((closes[-1] / closes[-5] - 1) * 100, 2)
+                if len(closes) >= 5 else None
+            ),
+            "pct_20d": (
+                round((closes[-1] / closes[-20] - 1) * 100, 2)
+                if len(closes) >= 20 else None
+            ),
+            "amount_ratio_20d": amount_ratio_20d,
+            "history": history,
+        }
+    return out
+
+
+def load_external_basket_supplement(
+    path: str = EXTERNAL_BASKET_SUPPLEMENT,
+    as_of_date: str = None,
+) -> tuple[list[dict], list[dict]]:
+    """Load reviewed external basket rows without mutating the event map.
+
+    Only approved, non-expired rows enter calculations. Candidate/rejected or
+    malformed rows stay visible in the review queue.
+    """
+    if not os.path.exists(path):
+        return [], []
+    frame = pd.read_csv(path, dtype=str).fillna("")
+    required = {
+        "sector_id", "sub_sector", "stock_code", "company_name",
+        "basket_role", "source_type", "source_name", "source_url",
+        "inclusion_reason", "business_relevance", "verified_on",
+        "review_status", "valid_until",
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"外部篮子补充表缺少字段: {','.join(missing)}")
+    check_date = as_of_date or datetime.now().strftime("%Y%m%d")
+    approved, review = [], []
+    for raw in frame.to_dict("records"):
+        row = {key: str(value).strip() for key, value in raw.items()}
+        digits = "".join(ch for ch in row["stock_code"] if ch.isdigit())
+        if len(digits) != 6 or not row["sector_id"]:
+            row["review_reason"] = "invalid_sector_or_stock_code"
+            review.append(row)
+            continue
+        row["stock_code"] = digits
+        row["ts_code"] = f"{digits}.SH" if digits.startswith("6") else f"{digits}.SZ"
+        valid_until = row.get("valid_until", "").replace("-", "")
+        expired = bool(valid_until and valid_until < check_date)
+        if row["review_status"] == "approved" and not expired:
+            approved.append(row)
+        else:
+            row["review_reason"] = "expired" if expired else row["review_status"]
+            review.append(row)
+    return approved, review
+
+
+def _basket_stats(values: list[dict]) -> dict:
+    if not values:
+        return {"n_stocks": 0, "coverage_confidence": "missing"}
+    n_stocks = len(values)
+    vals_5d = [v["pct_5d"] for v in values if v.get("pct_5d") is not None]
+    vals_20d = [v["pct_20d"] for v in values if v.get("pct_20d") is not None]
+    amount_ratios = [
+        v["amount_ratio_20d"] for v in values
+        if v.get("amount_ratio_20d") is not None
+    ]
+    return {
+        "n_stocks": n_stocks,
+        "coverage_confidence": (
+            "normal" if n_stocks >= 8 else
+            "limited" if n_stocks >= 5 else "low"
+        ),
+        "pct_today": round(sum(v["pct_today"] for v in values) / n_stocks, 2),
+        "pct_5d": round(sum(vals_5d) / len(vals_5d), 2) if vals_5d else None,
+        "pct_20d": round(sum(vals_20d) / len(vals_20d), 2) if vals_20d else None,
+        "median_today": round(float(pd.Series([
+            v["pct_today"] for v in values
+        ]).median()), 2),
+        "median_5d": round(float(pd.Series(vals_5d).median()), 2) if vals_5d else None,
+        "median_20d": round(float(pd.Series(vals_20d).median()), 2) if vals_20d else None,
+        "advance_ratio_today": round(
+            sum(v["pct_today"] > 0 for v in values) / n_stocks * 100, 1
+        ),
+        "advance_ratio_5d": (
+            round(sum(v > 0 for v in vals_5d) / len(vals_5d) * 100, 1)
+            if vals_5d else None
+        ),
+        "median_amount_ratio_20d": (
+            round(float(pd.Series(amount_ratios).median()), 2)
+            if amount_ratios else None
+        ),
+    }
+
+
 def fetch_subsector_basket_momentum(pro, trade_date: str = None) -> dict:
-    """Layer2：sectors_status.csv的signal_stock_code篮子当日/5日/20日等权涨跌幅。
+    """Layer2：SQLite主库sectors_status的signal_stock_code篮子等权涨跌幅。
 
     2026-07-22新增。动机：申万31个一级行业（Layer1）颗粒度太粗——今天贵金属+6~8%
     这种动作会被"有色金属"大类（混了工业金属）稀释成+2.9%，"算力租赁/Token工厂"
-    这种主题申万里根本没有独立分类。sectors_status.csv的76个子赛道恰好卡在中间
+    这种主题申万里根本没有独立分类。sectors_status的子赛道恰好卡在中间
     颗粒度，且signal_stock_code这一列2026-07-22已经通过sync_sectors_status()
     自动同步补齐了大部分（此前从建档起近一个月没更新），直接拿来当篮子用，
     不用新建任何东西。用pro.daily()逐只现算，不依赖任何"预算好的指数"
     （sw_daily/ths_daily这类指数接口今天已确认有1个交易日的发布延迟）。
     """
-    df, _ = load_csv(find_latest_csv_dir("tech"), "sectors_status")
-    if df is None:
-        return {"error": "sectors_status.csv不可用"}
+    df, _ = query_status(source="tech")
+    if df is None or df.empty:
+        return {"error": "SQLite主库sectors_status不可用"}
 
     if trade_date is None:
         cal = pro.trade_cal(exchange="SSE",
@@ -481,31 +822,295 @@ def fetch_subsector_basket_momentum(pro, trade_date: str = None) -> dict:
                 codes.append(ts_code)
                 all_codes.add(ts_code)
         if codes:
-            baskets[sid] = {"sub_sector": row.get("sub_sector", sid), "codes": codes}
+            baskets[sid] = {
+                "sub_sector": row.get("sub_sector", sid),
+                "event_codes": set(codes), "external_rows": [],
+            }
+
+    approved_external, review_queue = load_external_basket_supplement(
+        as_of_date=trade_date
+    )
+    for row in approved_external:
+        sid = row["sector_id"]
+        basket = baskets.setdefault(sid, {
+            "sub_sector": row["sub_sector"],
+            "event_codes": set(), "external_rows": [],
+        })
+        basket["external_rows"].append(row)
+        all_codes.add(row["ts_code"])
 
     _log(f"Layer2篮子动量: {len(baskets)}个子赛道，共{len(all_codes)}只不重复个股，"
          f"数据日期{trade_date}")
-    price_data = _fetch_basket_returns(pro, all_codes, trade_date)
+    price_data = _fetch_basket_returns_bulk(pro, all_codes, trade_date)
+    benchmark_start = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=45)).strftime("%Y%m%d")
+    try:
+        benchmark_frame = pro.index_daily(
+            ts_code="000300.SH", start_date=benchmark_start, end_date=trade_date,
+            fields="ts_code,trade_date,pct_chg",
+        )
+        benchmark_history = (
+            benchmark_frame.sort_values("trade_date").to_dict("records")
+            if benchmark_frame is not None and not benchmark_frame.empty else []
+        )
+    except Exception:
+        benchmark_history = []
 
     results = []
     for sid, b in baskets.items():
-        vals = [price_data[c] for c in b["codes"] if c in price_data]
-        if not vals:
+        event_codes = b["event_codes"]
+        external_codes = {row["ts_code"] for row in b["external_rows"]}
+        panorama_codes = event_codes | external_codes
+        event_vals = [price_data[c] for c in event_codes if c in price_data]
+        panorama_vals = [price_data[c] for c in panorama_codes if c in price_data]
+        if not panorama_vals:
             continue
-        avg_today = round(sum(v["pct_today"] for v in vals) / len(vals), 2)
-        vals_5d = [v["pct_5d"] for v in vals if v["pct_5d"] is not None]
-        vals_20d = [v["pct_20d"] for v in vals if v["pct_20d"] is not None]
+        event_stats = _basket_stats(event_vals)
+        panorama_stats = _basket_stats(panorama_vals)
+        preheat_features = build_sector_preheat_features(
+            panorama_vals, benchmark_history
+        )
+        external_by_code = {row["ts_code"]: row for row in b["external_rows"]}
+        active_response = []
+        for code in panorama_codes:
+            value = price_data.get(code)
+            if not value:
+                continue
+            if (
+                value["pct_today"] >= 3
+                or (value.get("pct_5d") is not None and value["pct_5d"] >= 5)
+                or (value.get("amount_ratio_20d") or 0) >= 1.8
+            ):
+                ext = external_by_code.get(code, {})
+                active_response.append({
+                    "ts_code": code,
+                    "company_name": ext.get("company_name", ""),
+                    "source_role": (
+                        ext.get("basket_role") or "event_map_signal"
+                    ),
+                    **value,
+                })
+        active_response.sort(
+            key=lambda row: (row["pct_today"], row.get("pct_5d") or -999),
+            reverse=True,
+        )
         results.append({
             "sector_id": sid,
             "sub_sector": b["sub_sector"],
-            "n_stocks": len(vals),
-            "pct_today": avg_today,
-            "pct_5d": round(sum(vals_5d) / len(vals_5d), 2) if vals_5d else None,
-            "pct_20d": round(sum(vals_20d) / len(vals_20d), 2) if vals_20d else None,
+            # Compatibility fields use the panorama basket from now on.
+            **panorama_stats,
+            "event_core": event_stats,
+            "market_panorama": panorama_stats,
+            "preheat_features": preheat_features,
+            "input_counts": {
+                "event_map": len(event_codes),
+                "external_approved": len(external_codes),
+                "external_pending_total": sum(
+                    row.get("sector_id") == sid for row in review_queue
+                ),
+            },
+            "external_sources": sorted({
+                row["source_name"] for row in b["external_rows"]
+            }),
+            "active_response": active_response[:10],
         })
 
     results.sort(key=lambda x: x["pct_today"], reverse=True)
-    return {"trade_date": trade_date, "n_baskets": len(results), "baskets": results}
+    return {
+        "trade_date": trade_date, "n_baskets": len(results),
+        "input_model": "event_map_plus_reviewed_external",
+        "external_registry": EXTERNAL_BASKET_SUPPLEMENT,
+        "external_approved_count": len(approved_external),
+        "external_review_queue": review_queue,
+        "baskets": results,
+    }
+
+
+def _latest_open_trade_date(pro, requested: str = None) -> str:
+    if requested:
+        return requested
+    end = datetime.now().strftime("%Y%m%d")
+    start = (datetime.now() - timedelta(days=14)).strftime("%Y%m%d")
+    cal = pro.trade_cal(exchange="SSE", start_date=start, end_date=end)
+    days = sorted(
+        cal.loc[cal["is_open"] == 1, "cal_date"].astype(str).tolist(),
+        reverse=True,
+    )
+    return days[0] if days else end
+
+
+def _latest_available_board_frame(pro, api_name: str, requested: str):
+    """Use the newest published board date, which can lag the trading calendar."""
+    start = (datetime.strptime(requested, "%Y%m%d") - timedelta(days=14)).strftime("%Y%m%d")
+    cal = pro.trade_cal(exchange="SSE", start_date=start, end_date=requested)
+    candidates = sorted(
+        cal.loc[cal["is_open"] == 1, "cal_date"].astype(str).tolist(),
+        reverse=True,
+    )
+    api = getattr(pro, api_name)
+    for candidate in candidates:
+        frame = api(trade_date=candidate)
+        if frame is not None and not frame.empty:
+            return frame, candidate
+    return pd.DataFrame(), requested
+
+
+def _safe_number(value, default: float = 0.0) -> float:
+    number = pd.to_numeric(value, errors="coerce")
+    return default if pd.isna(number) else float(number)
+
+
+def _member_preheat_for_hotspots(pro, rows: list[dict], trade_date: str, limit: int = 8) -> None:
+    """Attach the existing reusable preheat contract to the leading boards."""
+    memberships = {}
+    all_codes = set()
+    for row in rows[:limit]:
+        try:
+            if row["source"] == "ths":
+                members = pro.ths_member(ts_code=row["board_code"])
+                column = "con_code"
+            else:
+                parameter = f"{row['classification_level'].lower()}_code"
+                members = pro.index_member_all(**{parameter: row["board_code"], "is_new": "Y"})
+                column = "ts_code"
+        except Exception as exc:
+            row["member_error"] = str(exc)
+            continue
+        if members is None or members.empty or column not in members:
+            row["member_error"] = "empty"
+            continue
+        codes = {
+            str(code) for code in members[column]
+            if isinstance(code, str) and code.endswith((".SH", ".SZ"))
+        }
+        memberships[row["board_code"]] = codes
+        all_codes.update(codes)
+    if not all_codes:
+        return
+    price_data = _fetch_basket_returns_bulk(pro, all_codes, trade_date)
+    benchmark_start = (
+        datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=45)
+    ).strftime("%Y%m%d")
+    benchmark_frame = pro.index_daily(
+        ts_code="000300.SH", start_date=benchmark_start, end_date=trade_date,
+        fields="ts_code,trade_date,pct_chg",
+    )
+    benchmark_history = (
+        benchmark_frame.sort_values("trade_date").to_dict("records")
+        if benchmark_frame is not None and not benchmark_frame.empty else []
+    )
+    for row in rows[:limit]:
+        values = [
+            price_data[code] for code in memberships.get(row["board_code"], set())
+            if code in price_data
+        ]
+        row["member_stats"] = _basket_stats(values)
+        row["preheat_features"] = build_sector_preheat_features(
+            values, benchmark_history
+        )
+        # Reuse the equal-weight constituent history as the medium-horizon
+        # measure. This avoids one rate-limited history request per board.
+        if row.get("pct_5d") is None:
+            row["pct_5d"] = row["member_stats"].get("pct_5d")
+        if row.get("pct_20d") is None:
+            row["pct_20d"] = row["member_stats"].get("pct_20d")
+        row["medium_horizon_basis"] = "成分股等权均值"
+
+
+def fetch_ths_hotspot_momentum(pro, trade_date: str = None, top: int = 25) -> dict:
+    """Discover market themes from THS; this is market heat, not business purity."""
+    requested = _latest_open_trade_date(pro, trade_date)
+    catalogue = pro.ths_index(exchange="A")
+    latest, published_date = _latest_available_board_frame(
+        pro, "ths_daily", requested
+    )
+    if catalogue is None or catalogue.empty or latest is None or latest.empty:
+        return {"status": "unavailable", "trade_date": requested, "boards": []}
+    latest["trade_date"] = latest["trade_date"].astype(str)
+    actual = latest["trade_date"].max() if "trade_date" in latest else published_date
+    latest = latest[latest["trade_date"] == actual].copy()
+    meta = catalogue[["ts_code", "name", "type", "count"]].drop_duplicates("ts_code")
+    latest = latest.merge(meta, on="ts_code", how="inner")
+    latest = latest[
+        latest["type"].astype(str).isin({"N", "I"})
+        & (pd.to_numeric(latest["count"], errors="coerce") >= 3)
+    ]
+    # Trading-behaviour boards are useful for sentiment, but they are not
+    # sector rotation candidates and would crowd out actual industries/themes.
+    behaviour_tokens = (
+        "昨日", "复牌", "连板", "首板", "涨停", "炸板", "换手",
+        "振幅", "异动", "上市首",
+    )
+    latest = latest[
+        ~latest["name"].astype(str).map(
+            lambda name: any(token in name for token in behaviour_tokens)
+        )
+    ]
+    latest["pct_change"] = pd.to_numeric(latest["pct_change"], errors="coerce")
+    latest = latest.dropna(subset=["pct_change"]).sort_values("pct_change", ascending=False)
+    rows = []
+    for _, item in latest.head(top).iterrows():
+        code = str(item["ts_code"])
+        high = float(item["high"])
+        low = float(item["low"])
+        close = float(item["close"])
+        rows.append({
+            "source": "ths", "board_code": code,
+            "board_name": str(item["name"]), "board_type": str(item["type"]),
+            "constituent_count": int(_safe_number(item.get("count"))),
+            "trade_date": actual, "pct_today": round(float(item["pct_change"]), 2),
+            "pct_5d": None,
+            "pct_20d": None,
+            "turnover_rate": round(_safe_number(item.get("turnover_rate")), 2),
+            "close_location": round((close - low) / (high - low), 2) if high > low else 0.5,
+            "interpretation_boundary": "同花顺概念只代表市场热度，不代表主营纯度",
+        })
+    _member_preheat_for_hotspots(pro, rows, actual)
+    return {"status": "ok", "trade_date": actual, "boards": rows}
+
+
+def fetch_sw_subindustry_momentum(pro, trade_date: str = None, top: int = 25) -> dict:
+    """Add SW L2/L3 as a stable, finer-grained rotation discovery layer."""
+    requested = _latest_open_trade_date(pro, trade_date)
+    latest, published_date = _latest_available_board_frame(
+        pro, "sw_daily", requested
+    )
+    if latest is None or latest.empty:
+        return {"status": "unavailable", "trade_date": requested, "boards": []}
+    latest["trade_date"] = latest["trade_date"].astype(str)
+    actual = latest["trade_date"].max() if "trade_date" in latest else published_date
+    latest = latest[latest["trade_date"] == actual].copy()
+    classes = []
+    for level in ("L2", "L3"):
+        frame = pro.index_classify(level=level, src="SW2021")
+        if frame is None or frame.empty:
+            continue
+        frame = frame[["index_code", "industry_name"]].copy()
+        frame["classification_level"] = level
+        classes.append(frame)
+    if not classes:
+        return {"status": "unavailable", "trade_date": actual, "boards": []}
+    class_frame = pd.concat(classes, ignore_index=True).drop_duplicates("index_code")
+    latest = latest.merge(class_frame, left_on="ts_code", right_on="index_code", how="inner")
+    latest["pct_change"] = pd.to_numeric(latest["pct_change"], errors="coerce")
+    latest = latest.dropna(subset=["pct_change"]).sort_values("pct_change", ascending=False)
+    rows = []
+    for _, item in latest.head(top).iterrows():
+        code = str(item["ts_code"])
+        high = float(item["high"])
+        low = float(item["low"])
+        close = float(item["close"])
+        rows.append({
+            "source": "sw_subindustry", "board_code": code,
+            "board_name": str(item["industry_name"]),
+            "classification_level": str(item["classification_level"]),
+            "trade_date": actual, "pct_today": round(float(item["pct_change"]), 2),
+            "pct_5d": None,
+            "pct_20d": None,
+            "amount": round(_safe_number(item.get("amount")), 2),
+            "close_location": round((close - low) / (high - low), 2) if high > low else 0.5,
+        })
+    _member_preheat_for_hotspots(pro, rows, actual)
+    return {"status": "ok", "trade_date": actual, "boards": rows}
 
 
 def fetch_macro_hedge_baskets(pro, trade_date: str = None) -> dict:
@@ -587,11 +1192,17 @@ def main():
 
     subsector_basket_momentum = {}
     macro_hedge_baskets = {}
+    ths_hotspot_momentum = {}
+    sw_subindustry_momentum = {}
     if not args.skip_baskets:
         _log("计算Layer2子赛道篮子动量(sectors_status.csv signal_stock_code)...")
         subsector_basket_momentum = fetch_subsector_basket_momentum(pro)
         _log("计算Layer3宏观避险篮子动量(贵金属等，事件地图范围外)...")
         macro_hedge_baskets = fetch_macro_hedge_baskets(pro)
+        _log("扫描同花顺热点概念（市场热度发现层，非主营纯度标签）...")
+        ths_hotspot_momentum = fetch_ths_hotspot_momentum(pro)
+        _log("扫描申万二/三级行业轮动...")
+        sw_subindustry_momentum = fetch_sw_subindustry_momentum(pro)
 
     result = {
         "fetch_time": datetime.now().isoformat(),
@@ -607,6 +1218,8 @@ def main():
         "technical_levels": technical_levels,
         "subsector_basket_momentum": subsector_basket_momentum,
         "macro_hedge_baskets": macro_hedge_baskets,
+        "ths_hotspot_momentum": ths_hotspot_momentum,
+        "sw_subindustry_momentum": sw_subindustry_momentum,
     }
 
     if args.json:

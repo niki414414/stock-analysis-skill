@@ -34,14 +34,17 @@ DATA_TARGETS = [
     Path("交易规则"),
     Path("技能数据/company_code_map.csv"),
     Path("技能数据/公司.xlsx"),
+    # 文件名是迁移期遗留；库内metadata.build_mode=sqlite_primary才是主库身份依据。
     Path("技能数据/event_map_shadow.db"),
     Path("技能数据/event_db_audit.json"),
     Path("技能数据/event_db_migration_history.json"),
+    Path("技能数据/decision_journal.jsonl"),
     Path("技能数据/科技产业事件"),
     Path("技能数据/非科技产业事件地图"),
     Path("技能数据/事件地图变更包"),
     Path("技能数据/事件地图导出"),
     Path("技能数据/market_daily_snapshot"),
+    Path("技能数据/运行记录"),
 ]
 
 FORBIDDEN_NAMES = {".env", ".git", "__pycache__", ".DS_Store"}

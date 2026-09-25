@@ -8,7 +8,7 @@
 #
 # 赛道阶段/优先级/位置的唯一数据源现在是事件地图 sectors_status.csv，
 # 查询方式：python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py status
-# （top_picks_screener.py 已改为直接读取该csv，见 load_sector_status()）
+# 旧top_picks_screener.py已归档；本文件不再为主动选股提供赛道阶段数据。
 #
 # macro_heat（九转计数+MACD柱+成交额+轮动，大盘动能三态判断）内容未丢弃，
 # 迁移至 ~/.claude/skills/stock-analysis/references/research_log.md 作为

@@ -3,7 +3,7 @@ name: update-event-map
 description: |
   科技/非科技产业事件地图维护技能 v1.0。
   接收用户提供的研究材料（PDF/文本/截图）或自动WebSearch扫描行业动态，
-  完成：加载最新数据库 → 分析材料/搜索 → 分类入库 → 生成新版本CSV+Excel。
+  完成：加载SQLite主库 → 分析材料/搜索 → 分类入库及生命周期记录 → 按需导出CSV/Excel。
 
   支持操作：
   - 从研究材料批量提取事件并录入
@@ -23,17 +23,39 @@ allowed-tools:
   - WebSearch
 metadata:
   trigger: 用户要求维护/更新产业事件地图时触发
-  version: "1.0"
-  last_updated: "2026-06-21"
+  version: "1.1"
+  last_updated: "2026-09-11"
 ---
 
 # 产业事件地图维护技能 v1.0
 
+## 来自微信研究收件箱的分流输入
+
+当上游 `wechat-research-intake` 传入一篇文章的事件片段时，只处理已经被分为事实、早期信号、
+前瞻、修正或公司关系的片段。纯盘面观点、作者仓位、交易口号和方法论交给
+`update-market-thesis`，不得为了“整篇入库”塞进事件表；可定位日期、主题和验证条件的市场情绪或
+传播线索可以同时进入 `signals_early`，但必须把“情绪存在”与“因果成立”分开标注。
+
+- 保留文章 frontmatter 中的发布日期、`article_id`、`source_url` 和本地文件路径。
+- 一篇文章可以拆成多个主题；每个主题先用 `catalyst_dossier.py search --context --json`
+  查询全历史，再决定追加已有事件还是新建事件。
+- 公众号整理文默认只是材料来源。精确订单、产能、价格、客户、时间表和公司关系必须按证据等级
+  单独核验；没有一手证据时降级为 `signals_early` 或待验证关系。
+- 同一片段同时包含事实和作者推断时必须拆开，不能让推断继承事实的证据等级。
+- 市场情绪、传播热度、盘面归因和低证据产业线索也有研究价值：不得直接丢弃。科技和非科技均可
+  写入 `signals_early`，明确标注“情绪存在”与“因果未证实”，并给出后续验证指标；学习链同时保留
+  可复用的盘面或产业框架。
+- 只有正式变更成功并通过主库审计后，才能向收件箱台账返回已完成的事件ID；失败或待确认时返回
+  `partial`，避免整篇文章被误标为已处理。
+
 ## 核心工具
 
 ```
-UPDATER=~/.claude/skills/update-event-map/scripts/event_map_updater.py
-QUERY=~/.claude/skills/stock-analysis/scripts/event_map_query.py
+DB="$TZ_CODEX_HOME/repo/scripts/event_db.py"
+CUTOVER="$TZ_CODEX_HOME/repo/scripts/event_db_cutover.py"
+UPDATER="$TZ_CODEX_HOME/repo/skills/update-event-map/scripts/event_map_updater.py"
+QUERY="$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py"
+DOSSIER="$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/catalyst_dossier.py"
 ```
 
 ---
@@ -43,11 +65,12 @@ QUERY=~/.claude/skills/stock-analysis/scripts/event_map_query.py
 每次触发必须先运行：
 
 ```bash
-python3 $UPDATER status
-python3 $UPDATER status --source nonfin
+python3 $DB status
+python3 $DB audit
 ```
 
-向用户报告：当前版本、各表行数、上次更新日期。
+必须确认`build_mode=sqlite_primary`、`integrity=ok`、外键错误为0，再读取核心表行数。
+`$UPDATER status`只用于查看历史CSV导出批次，不代表当前主库状态。
 
 ---
 
@@ -79,7 +102,12 @@ python3 $UPDATER status --source nonfin
 python3 $QUERY events --sector {相关赛道}
 python3 $QUERY forward --sector {相关赛道}
 python3 $QUERY corrections
+python3 $DOSSIER search "{事件关键词}" --context --json
+python3 $DOSSIER show {source} {候选事件ID}
 ```
+
+`search --context`返回细分主题时，必须区分直接证据、上级事件背景、结构化公司关系与材料文字
+点名；不得因细分词出现在宽事件的备注或影响方向中，就把宽事件全部内容升级为该细分主题。
 
 5. 可选WebSearch验证关键声明：
 
@@ -108,6 +136,9 @@ WebSearch("{赛道} 最新产业动态 订单 催化 {当前年月}")
 - 有色金属、储能、创新药、银行/证券
 
 对搜索结果与现有数据库做增量比对。
+
+主动扫描同样先用`$DOSSIER search --context/show`读取已有纵向记录。新消息必须回答“相对旧逻辑新增了
+什么”，而不是只把最新新闻作为孤立事件再次入库。
 
 ---
 
@@ -144,7 +175,11 @@ Q4: 指出现有判断需要修正/降权？
 
 ## STEP 4: Delta对比 + 用户确认
 
-将拟录入的内容整理成表格向用户展示：
+将拟录入的内容整理成表格向用户展示。若用户已明确授权“直接入库、入库后核对”，则跳过事前
+确认，在原子写入和审计成功后展示实际Delta；删除、覆盖、高置信度升级或公司映射仍需谨慎确认。
+
+默认直接在对话窗口展示，不为一次性确认单独生成Markdown或办公文件。仅当变更需延期核验、
+审计留档、后续反复查询，或用户明确要求文件时，才持久化变更清单。
 
 ```
 拟录入变更清单（{日期}）
@@ -186,34 +221,48 @@ python3 $UPDATER next-ids --table signals_early --count {N}
   },
   "updates": {
     "events": [{"id_value": "MEM-2026-005", "fields": {"当前状态": "已兑现"}}]
-  }
+  },
+  "lifecycle_observations": [{
+    "event_id": "MEM-2026-005",
+    "observed_at": "YYYY-MM-DD",
+    "kind": "milestone",
+    "summary": "本次相对原逻辑新增的事实或反证",
+    "source_grade": "official",
+    "source_ref": "来源URL",
+    "related_codes": ["000001"]
+  }]
 }
 ```
+
+每个实质性新增或更新事件至少写一条`lifecycle_observations`，记录本次增量、证据等级和来源。
+纯格式修正可以不写，但变更包必须增加`"lifecycle_exempt_reason": "仅修正错别字……"`。
+引用不存在事件、非法日期/类型/证据等级会在
+主库变更前被拒绝；完全相同的生命周期记录会幂等跳过。
 
 2. 执行写入（SQLite主库启用后唯一合法入口）：
 
 ```bash
-python3 repo/scripts/event_db_cutover.py apply --source tech --changes /tmp/event_map_changes.json
+python3 "$CUTOVER" apply --source tech --changes /tmp/event_map_changes.json
 ```
 
-旧`event_map_updater.py apply`只用于SQLite切换前的历史流程；检测到
-`metadata.build_mode=sqlite_primary`后会主动拒绝CSV写入，禁止形成双主。
+旧`event_map_updater.py apply`已经从命令入口移除并强制拒绝调用，禁止形成双主。
 
 3. 验证：
 
 ```bash
-python3 $UPDATER validate
+python3 $DB status
+python3 $DB audit
 ```
 
 ---
 
-## STEP 5.5: 公司池同步（2026-07-10起自动执行，无需手动操作）
+## STEP 5.5: 公司关系与兼容公司池
 
-`apply`命令内部会自动调用`sync_company_pool()`：扫描本次新增的mapping行的"代表公司/公司类型"字段，查company_code_map.csv确认A股代码，不在公司.xlsx里的自动按(一级赛道, 二级环节, 三级环节/定位, 关联事件ID)写入对应的科技/非科技公司池sheet。apply运行完会打印同步结果（新增几家/跳过几家无代码的）。
+SQLite写入完成后会从主库源行重建结构化公司—事件关系；现行催化扫描器直接读取该关系，
+不依赖先修改`公司.xlsx`。
 
-**这一步不再需要你（Claude）记得手动做**——之前这里是纯prompt指令，容易漏做；现在写死在代码里，只要走了STEP 5的`apply`就一定会跑。
-
-若某次material里提到的公司改动没走`apply`（比如只是手动改了mapping.csv），可以单独补跑：
+`公司.xlsx`仅为仍需它的旧查询和恢复兼容文件，不是事件关系主库。确有兼容需要时，才根据
+同一份变更包补跑：
 ```bash
 python3 $UPDATER sync-pool --source tech --changes /tmp/event_map_changes.json
 ```
@@ -228,17 +277,18 @@ python3 $UPDATER reconcile-pool --source tech --sector {一级赛道}
 优先通过`company_code_map.csv`做实体识别。每次新增一个既有大赛道的mapping后，建议运行
 该赛道对账，随后再次运行确认`+0条公司角色`，完成幂等校验。
 
-**关键链路**：事件地图更新(apply) → 公司池自动同步(sync_company_pool) → scanner/window模型自动覆盖新公司，无需额外操作
+**现行关键链路**：SQLite事务写入 → 重建并校验公司—事件关系 → scanner/window模型读取主库。
+兼容公司池是否同步必须单独记录，不能误报为自动完成。
 
 ---
 
-## STEP 6: 导出Excel + 统一备份（每次实质性更新后执行）
+## STEP 6: 按需导出 + 统一备份
 
 ```bash
 # SQLite直接导出兼容CSV和Excel；导出物只读，不得反向编辑入库
-python3 repo/scripts/event_db_cutover.py export-csv \
+python3 "$CUTOVER" export-csv \
   --date {YYYYMMDD} --output-root "$TZ_CODEX_HOME/技能数据/事件地图导出/{YYYYMMDD}_sqlite_primary"
-python3 repo/scripts/event_db_cutover.py export-excel --source tech \
+python3 "$CUTOVER" export-excel --source tech \
   --output "$TZ_CODEX_HOME/技能数据/事件地图导出/{YYYYMMDD}_sqlite_primary/{MMDD}_sqlite_primary.xlsx"
 
 # 数据与代码校验通过后，在 repo 中提交并推送。
@@ -246,7 +296,8 @@ python3 repo/scripts/event_db_cutover.py export-excel --source tech \
 python3 "$TZ_CODEX_HOME/repo/scripts/create_local_backup.py"
 ```
 
-Excel包含10个sheet（00_使用说明 到 10_早期信号追踪），冻结首行，自适应列宽。
+CSV/Excel是查看、交换和恢复副本，日常消费者不依赖导出动作。仅在用户需要查看文件、迁移或
+备份时导出。Excel包含兼容sheet，冻结首行，自适应列宽。
 离线包写入 `$TZ_CODEX_HOME/迁移归档/`，保留时间戳恢复点并在生成后自动复验。
 
 ---
@@ -267,7 +318,7 @@ Excel包含10个sheet（00_使用说明 到 10_早期信号追踪），冻结首
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   事件地图更新完成 — {YYYY-MM-DD}
-  版本: csv{MMDD}_{label}
+  主库: SQLite / 更新日期: {YYYY-MM-DD}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   变更统计:
@@ -276,6 +327,7 @@ Excel包含10个sheet（00_使用说明 到 10_早期信号追踪），冻结首
   forward:       +{N}新增
   corrections:   +{N}新增
   sources:       +{N}新增
+  lifecycle:     +{N}新增  ={M}重复跳过
 
   验证: ✓ 通过 / ⚠️ {N}个问题
 
@@ -291,7 +343,7 @@ Excel包含10个sheet（00_使用说明 到 10_早期信号追踪），冻结首
 
 | 场景 | 处理 |
 |---|---|
-| CSV目录不存在 | 提示用户检查路径或从迁移包恢复 |
+| SQLite主库不存在/校验失败 | 停止写入，提示检查主库路径或从迁移包恢复 |
 | changes JSON字段名不匹配 | 显示正确字段名，要求修正 |
 | 事件ID重复 | 警告并要求确认是否覆盖 |
 | 赛道名不在已知列表 | 显示已知赛道列表供选择 |
@@ -306,4 +358,4 @@ Excel包含10个sheet（00_使用说明 到 10_早期信号追踪），冻结首
 - 不输出目标价/目标市值
 - 公司名称仅用于产业链定位
 - 传闻订单不直接写成事实事件
-- 不单独覆盖旧版本（始终创建新csvMMDD）
+- 不把CSV/Excel导出物当作在线主库，也不允许其反向覆盖SQLite

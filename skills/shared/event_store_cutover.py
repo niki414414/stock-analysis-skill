@@ -31,6 +31,7 @@ TABLE_COLUMNS = {
         "events": ["事件ID", "一级赛道", "二级事件", "事件名称", "事件时间", "当前状态", "重要程度", "是否已被交易", "是否存在预期差", "主要影响方向", "后续观察指标", "备注"],
         "mapping": ["事件ID", "一级赛道", "二级事件", "产业链位置", "受益方向", "代表公司类型", "弹性来源", "风险点", "备注"],
         "forward": ["事件ID", "观察周期", "关键日期/窗口", "观察指标", "验证逻辑", "可能结果", "跟踪优先级", "备注"],
+        "signals_early": ["signal_id", "signal_date", "event_id", "对应事件", "signal_stage", "早期信号内容", "产业链环节", "代表公司/公司类型", "later_validation", "market_trade_status", "confidence_level", "source_type", "source_ref", "风险/修正说明", "最新更新时间"],
         "sources": ["来源ID", "日期", "来源类型", "标题/内容", "URL", "对应事件", "可靠性"],
     },
 }
@@ -193,6 +194,7 @@ def export_excel_from_db(db_path: Union[Path, str], output_path: Union[Path, str
         "nonfin": {
             "events": "02_事件总库", "mapping": "03_产业映射树",
             "forward": "05_前瞻跟踪", "sources": "08_来源记录",
+            "signals_early": "10_早期信号追踪",
         },
     }
     con = sqlite3.connect(db_path)

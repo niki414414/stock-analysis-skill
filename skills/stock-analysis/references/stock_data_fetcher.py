@@ -152,6 +152,8 @@ def _df_to_ohlcv(df, days):
             "volume": _safe_float(row.get("volume")),
             "amount": _safe_float(row.get("amount")),
             "pct_chg": _safe_float(row.get("pct_chg")),
+            "price_basis": row.get("price_basis"),
+            "raw_close": _safe_float(row.get("raw_close")),
         })
     return ohlcv
 
@@ -171,6 +173,13 @@ def _fetch_tushare_a(code: str, days: int):
     df = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
     if df is None or df.empty:
         raise ValueError(f"Tushare returned no data for {code}")
+    repo_root = os.path.join(os.path.expanduser(os.environ.get(
+        "TZ_CODEX_HOME", "~/Desktop/tz-codex")), "repo")
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from skills.shared.price_data import adjust_to_latest
+    factors = pro.adj_factor(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    df = adjust_to_latest(df, factors)
     col_map = {
         "trade_date": "date", "open": "open", "close": "close",
         "high": "high", "low": "low", "vol": "volume",
@@ -187,7 +196,7 @@ def _fetch_tushare_a(code: str, days: int):
 def _fetch_efinance_a(code: str, days: int):
     """Fetch A-share via efinance (EastMoney). Returns (ohlcv, source) or raises."""
     import efinance as ef
-    df = ef.stock.get_quote_history(code)
+    df = ef.stock.get_quote_history(code, fqt=1)
     if df is None or df.empty:
         raise ValueError(f"efinance returned no data for {code}")
     col_map = {
@@ -197,6 +206,7 @@ def _fetch_efinance_a(code: str, days: int):
     }
     df = df.rename(columns=col_map)
     _log(f"[{code}] Using efinance (free)")
+    df["price_basis"] = "provider_qfq"
     return _df_to_ohlcv(df, days), "efinance"
 
 
@@ -223,12 +233,8 @@ def _fetch_akshare_a(code: str, days: int):
     import akshare as ak
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
-    try:
-        df = ak.stock_zh_a_hist(symbol=code, period="daily",
-                                start_date=start_date, end_date=end_date, adjust="qfq")
-    except Exception:
-        df = ak.stock_zh_a_hist(symbol=code, period="daily",
-                                start_date=start_date, end_date=end_date, adjust="")
+    df = ak.stock_zh_a_hist(symbol=code, period="daily",
+                            start_date=start_date, end_date=end_date, adjust="qfq")
     if df is None or df.empty:
         raise ValueError(f"akshare returned no data for {code}")
     col_map = {
@@ -238,6 +244,7 @@ def _fetch_akshare_a(code: str, days: int):
     }
     df = df.rename(columns=col_map)
     _log(f"[{code}] Using akshare (free)")
+    df["price_basis"] = "provider_qfq"
     return _df_to_ohlcv(df, days), "akshare"
 
 
@@ -271,7 +278,7 @@ def _fetch_yfinance(code: str, market: str, days: int):
     import yfinance as yf
     yf_code = to_yfinance_code(code, market)
     ticker = yf.Ticker(yf_code)
-    hist = ticker.history(period=f"{days}d")
+    hist = ticker.history(period=f"{days}d", auto_adjust=True)
     if hist is None or hist.empty:
         raise ValueError(f"yfinance returned no data for {yf_code}")
     ohlcv = []

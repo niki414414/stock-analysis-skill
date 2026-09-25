@@ -46,11 +46,11 @@ WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
 REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+from skills.shared.price_data import adjust_to_latest
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
 COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
 CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
 EVENT_DB = os.path.join(DATA_ROOT, "event_map_shadow.db")
-CSV_BASE_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 
 # ── 申万行业轮动雷达 ──────────────────────────────────────────────────────────
 # 使用 SW2021 标准代码（via pro.index_classify(level='L1', src='SW2021')）
@@ -392,11 +392,7 @@ def load_company_candidates(active_events: pd.DataFrame, source: str = "sqlite")
     """Resolve active-event companies from SQLite; Excel is explicit fallback only."""
     if source == "excel":
         return _load_company_candidates_excel(active_events)
-    try:
-        return _load_company_candidates_sqlite(active_events)
-    except Exception as exc:
-        log.warning(f"SQLite公司关系读取失败，启用Excel紧急回退: {exc}")
-        return _load_company_candidates_excel(active_events)
+    return _load_company_candidates_sqlite(active_events)
 
 # ── Step 3: 价格未动验证 ──────────────────────────────────────────────────────
 def fetch_price_batch(pro, codes: list, trade_date: str, n_days: int = 65) -> dict:
@@ -413,16 +409,24 @@ def fetch_price_batch(pro, codes: list, trade_date: str, n_days: int = 65) -> di
             suffix = "SH" if code.startswith("6") or code.startswith("688") else "SZ"
             ts_code = f"{code}.{suffix}"
             df = pro.daily(ts_code=ts_code, start_date=start_str, end_date=trade_date,
-                           fields="trade_date,open,high,low,close,pct_chg,vol")
+                           fields="ts_code,trade_date,open,high,low,close,pct_chg,vol")
             if df is None or df.empty:
+                log.warning(f"  {code} 目标日前无可用日线，已排除")
                 result[code] = []
                 continue
+            latest_date = df["trade_date"].astype(str).max()
+            if latest_date != trade_date:
+                log.warning(f"  {code} 行情日期{latest_date}落后于目标{trade_date}，已排除")
+                result[code] = []
+                continue
+            factors = pro.adj_factor(ts_code=ts_code, start_date=start_str, end_date=trade_date)
+            df = adjust_to_latest(df, factors)
             df = df.sort_values("trade_date")
             result[code] = [
                 {"date": r["trade_date"], "open": float(r["open"]),
                  "high": float(r["high"]), "low": float(r["low"]),
                  "close": float(r["close"]), "pct_chg": float(r.get("pct_chg", 0)),
-                 "vol": float(r.get("vol", 0))}
+                 "vol": float(r.get("vol", 0)), "price_basis": r["price_basis"]}
                 for _, r in df.iterrows()
             ]
         except Exception as e:
@@ -548,6 +552,7 @@ def analyze_price_freshness(bars: list) -> dict:
             close, ma60, vol_ratio, vols, bars)
 
     return {
+        "price_basis": latest.get("price_basis", "unspecified"),
         "close":          round(close, 2),
         "ma20":           round(ma20, 2),
         "ma60":           round(ma60, 2),
@@ -918,12 +923,22 @@ def main():
     trade_date = args.as_of or resolve_trade_date(pro)
     log.info(f"=== 催化左侧扫描 trade_date={trade_date} ===")
 
+    def emit_empty():
+        if args.reactivation_only:
+            print(json.dumps({"trade_date": trade_date, "pending_events": 0,
+                              "pending_companies": 0, "confirmed_events": []}, ensure_ascii=False))
+        else:
+            print("[]" if args.json else "无候选公司")
+
     # Step 0b: 板块轮动雷达（非JSON模式自动输出）
     if not args.json:
         rotation_check(pro)
 
     # Step 1: 活跃事件（唯一权威来源=window模型，见load_window_scores）
     active_events = load_active_events()
+    if active_events.empty:
+        emit_empty()
+        return
     active_events = active_events[
         (active_events["catalyst_score"] >= args.min_event_score)
         | active_events["activation_pending"].fillna(False).astype(bool)
@@ -933,7 +948,7 @@ def main():
     # Step 2: 公司映射
     candidates = load_company_candidates(active_events, source=args.company_source)
     if candidates.empty:
-        print("无候选公司")
+        emit_empty()
         return
 
     # Step 3a: reactivation pre-pass only fetches dormant-event companies. This keeps
@@ -959,12 +974,13 @@ def main():
     price_map.update(fetch_price_batch(pro, regular_codes, trade_date, n_days=65))
     candidates = pd.concat([regular_candidates, confirmed_pending], ignore_index=True)
     if candidates.empty:
-        print("无候选公司")
+        emit_empty()
         return
 
     # Step 4: 评分过滤
     results = score_candidates(candidates, price_map)
     results = attach_sector_repair(results, compute_sector_repair(candidates, price_map))
+    results["trade_date"] = trade_date
     log.info(f"通过价格筛选: {len(results)} 家")
 
     # Step 4b: 前瞻记录（全部通过价格筛选的候选都记，不只是展示的top N）

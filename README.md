@@ -1,61 +1,92 @@
-# A股投资辅助框架 — 备份仓库
+# A股投资辅助框架
 
-这是一套配合 Claude Code 使用的股票分析框架的完整备份，覆盖四个技能、决策 memory、和赛道数据。
+这是一套由AI协助使用的A股研究与决策辅助框架，覆盖大盘与板块复盘、三类选股策略、
+单股六层分析、产业事件库和连续复盘记录。
 
-**用途**：容灾/换设备/换 AI 工具时的单一恢复入口。日常工作仍在本地 `~/.claude/skills/` 和
-`~/.claude/projects/-Users-niki/memory/` 进行，本仓库是每次做完一轮迭代后同步的镜像，
-不是实时同步。
+本仓库现在是框架代码和规则的当前工作版本，同时也用于版本追踪与恢复。日常到底从哪里
+开始，请先看 [当前正式入口清单](ACTIVE_ENTRYPOINTS.md)，不要从历史迁移包或旧快照运行。
+
+日常盘面与板块简报当前使用输出驱动入口：
+
+```bash
+python3 skills/market-outlook/scripts/market_brief_v2.py --save
+```
+
+它一次生成可读文章与同源证据；旧`market_daily_review.py`只在需要事件、持仓或策略全链路时运行。
+
+## 对话快捷口令
+
+日常可以直接说中文简称，不必记脚本名：
+
+- `箱体`或`V2`：简单盘面与板块复盘；普通“复盘”默认也走这里，不确认涨停。
+- `全景`：包含事件、持仓和策略路由的完整复盘。
+- `推土机`、`波段`、`底仓`：分别运行对应候选池，三类结果不会混排。
+- `六层`：深入检查指定股票、ETF或现有持仓。
+- `事件查`、`事件录`、`文章校验`、`账本`、`改框架`、`备份`：启动对应专项。
+
+这里的简称是对话路由，不是Shell别名。完整边界以[当前正式入口清单](ACTIVE_ENTRYPOINTS.md)为准。
 
 如果你是被临时拉来接手这个项目的 AI（Codex / Gemini / 其他），请先读 [HANDOFF.md](HANDOFF.md)。
 
-## 事件数据库影子模式
+## 事件数据库当前状态
 
-产业事件数据当前处于SQLite影子迁移阶段：CSV仍为写入主源，更新后自动重建
-`技能数据/event_map_shadow.db`。统一查询入口为：
+SQLite已经是产业事件的唯一写入主库；CSV和Excel只作为查看、交换和恢复产物，禁止用旧CSV
+反向覆盖SQLite。统一查询入口为：
 
 ```bash
 python3 scripts/event_db.py company 300454
 python3 scripts/event_db.py sector AI应用
 python3 scripts/event_db.py event AI-SAAS-2026-001
 python3 scripts/event_db.py catalysts --sector AI应用
-python3 scripts/event_db.py compare sector AI应用
-python3 scripts/event_db.py migration-status
+python3 scripts/event_db.py status
+python3 scripts/event_db.py audit
 ```
 
-迁移状态与切换边界见`memory/project-event-store-sqlite-shadow.md`。
+正式入库与导出使用`scripts/event_db_cutover.py`；旧`event_map_updater.py apply`已经停用。
+迁移历史与切换边界见`memory/project-event-store-sqlite-shadow.md`。
 股票系统各层职责边界见`memory/feedback_stock_system_layer_boundary.md`。
 
 ## 目录结构
 
 ```
 skills/
-  stock-analysis/       被动分析：给股票代码 → 六层检查看板（v4.8框架核心）
-  top-picks/             主动扫描：催化驱动左侧扫描，找就绪/预热标的
-  update-event-map/       维护赛道事件地图数据库
-  update-market-thesis/   维护市场趋势判断底稿
-  shared/                 daily_notify.py（微信推送）+ watchlist.yaml（自选池）
+  market-outlook/         箱体V2、全景复盘及三类市场扫描器
+  stock-analysis/         指定股票或ETF的六层检查
+  top-picks/              波段候选实现；日常统一由策略路由器调用
+  quality-compounder/     质量底仓候选实现
+  update-event-map/       事件资料维护规则
+  update-framework/       正式框架变更约束
+  shared/                 事件存储、通知及其他内部共享实现
+
+scripts/
+  stock_strategy_router.py     推土机、波段、底仓的内部统一路由
+  event_db.py                  SQLite事件库只读查询与检查
+  event_db_cutover.py          SQLite主库正式写入与导出
+  daily_decision_journal.py    判断、操作与结果账本
+  create_local_backup.py       本地恢复包创建与校验
 
 memory/
   MEMORY.md               记忆索引，其余 *.md 是具体记忆条目
                           （框架版本决策、回测结果、持仓状态、用户偏好等）
 
 data/
-  events-map/tech/         科技主线事件地图最新一版CSV + Excel
-  events-map/non-tech/     非科技主线事件地图
-  company-pool/            公司池 Excel + 代码映射表
-  research-materials/      近期研究材料原文
+  events-map/             SQLite主库的查看、交换和恢复导出，禁止反向覆盖主库
+  company-pool/           公司池与代码映射
+  operational-state/      运行状态、自选池和扫描记录
+  research-materials/     研究材料原文
 ```
 
 ## 恢复到本地使用
 
 ```bash
-git clone https://github.com/niki414414/stock-analysis-skill.git
-cp -r stock-analysis-skill/skills/* ~/.claude/skills/
-cp -r stock-analysis-skill/memory/* ~/.claude/projects/-Users-niki/memory/
+git clone https://github.com/niki414414/stock-analysis-skill.git /path/to/tz-codex/repo
+cd /path/to/tz-codex/repo
+cp .env.example .env
+export TZ_CODEX_HOME=/path/to/tz-codex
 ```
 
-之后需要手动重建 `~/.claude/skills/.env`（Tushare token、Server酱 SendKey ——
-这两个密钥没有进本仓库，需要从密码管理器或原始注册渠道找回）。
+日常直接从仓库正式入口运行，不再把`skills/`复制到特定AI工具目录。需要在线数据时，
+根据`.env.example`重建`.env`；密钥不进入Git，需要从密码管理器或原始注册渠道找回。
 
 ## 维护与备份约定
 

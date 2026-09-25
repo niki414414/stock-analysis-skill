@@ -172,14 +172,20 @@ def _filter_by_pe(pro, members, pe_max, trade_date):
     try:
         df = pro.daily_basic(trade_date=trade_date, fields="ts_code,pe_ttm,total_mv")
     except Exception as e:
-        _log(f"daily_basic({trade_date}) 失败: {e}")
-        df = None
+        raise RuntimeError(f"daily_basic({trade_date})取数失败；不能解释为无候选") from e
+    if df is None or df.empty:
+        raise RuntimeError(f"daily_basic({trade_date})为空；不能解释为无候选")
     if df is not None and not df.empty:
         for _, row in df.iterrows():
             pe_map[row["ts_code"]] = {"pe_ttm": _safe_float(row.get("pe_ttm")),
                                        "total_mv": _safe_float(row.get("total_mv"))}
 
     kept = []
+    # A returned null PE may mean a loss-making company; an absent row is a
+    # coverage gap. Do not confuse these two cases.
+    missing = [m["ts_code"] for m in members if m["ts_code"] not in pe_map]
+    if missing:
+        raise RuntimeError(f"PE数据不完整（{len(missing)}只）：{','.join(missing[:10])}；筛选未完成")
     for m in members:
         info = pe_map.get(m["ts_code"])
         pe = info.get("pe_ttm") if info else None
@@ -206,6 +212,8 @@ def _fetch_annual_netprofit(pro, members, lookback_years):
 
     code_set = {m["ts_code"] for m in members}
     series = {code: {} for code in code_set}
+    if not code_set:
+        return series, years
 
     for y in years:
         period = f"{y}1231"
@@ -213,10 +221,9 @@ def _fetch_annual_netprofit(pro, members, lookback_years):
             df = pro.income_vip(period=period,
                                  fields="ts_code,end_date,n_income_attr_p,revenue")
         except Exception as e:
-            _log(f"income_vip({period}) 失败: {e}")
-            continue
+            raise RuntimeError(f"income_vip({period})取数失败；质量筛选未完成") from e
         if df is None or df.empty:
-            continue
+            raise RuntimeError(f"income_vip({period})为空；质量筛选未完成")
         df = df[df["end_date"] == period]
         df = df[df["ts_code"].isin(code_set)]
         # 同一 end_date 可能有多条（不同披露批次），保留最后一条（一般是最新修正版）

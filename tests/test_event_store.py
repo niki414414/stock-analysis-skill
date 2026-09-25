@@ -122,6 +122,84 @@ def test_company_event_schema_keeps_screening_boundary(tmp_path):
     assert not {"commercial_stage", "benefit_directness", "evidence_grade"} & columns
 
 
+def test_company_pool_links_preserve_unbound_excel_mappings(tmp_path):
+    module = load_store_module()
+    db = tmp_path / "event.db"
+    con = sqlite3.connect(db)
+    con.executescript(module.SCHEMA_SQL)
+    con.execute("INSERT INTO companies(company_name,stock_code) VALUES('全志科技','300458')")
+    company_id = con.execute("SELECT company_id FROM companies").fetchone()[0]
+    con.execute(
+        """INSERT INTO company_pool_links(
+           source,pool_sheet,company_id,sector,role_2,role_3,pool_event_ref,
+           relation_status,benefit_tier,mapping_basis,mapping_confidence,source_ref)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ('tech', '科技公司池', company_id, '端侧AI与消费电子', 'AI SoC/端侧芯片',
+         '端侧主控', 'AI-SOC-2026-001', '待绑定事件', '角色关联', '公司池登记', '中', '今日增补'),
+    )
+    con.commit()
+    con.close()
+
+    rows = module.EventStore(db).company('300458')
+    assert len(rows) == 1
+    assert rows[0]['event_id'] == 'AI-SOC-2026-001'
+    assert rows[0]['relation_status'] == '待绑定事件'
+    assert rows[0]['role_2'] == 'AI SoC/端侧芯片'
+
+
+def test_nonfin_mapping_creates_company_event_link(tmp_path):
+    module = load_store_module()
+    source = tmp_path / "nonfin"
+    source.mkdir()
+    pd.DataFrame([{
+        "事件ID": "CXO-2026-001", "一级赛道": "医药/创新药", "二级事件": "业绩验证",
+        "事件名称": "CXO业绩验证", "事件时间": "2026H2", "当前状态": "进行中",
+        "重要程度": "★★★★", "是否已被交易": "部分交易", "是否存在预期差": "有",
+        "主要影响方向": "CXO龙头", "后续观察指标": "订单", "备注": "",
+    }]).to_csv(source / "events_test.csv", index=False)
+    pd.DataFrame([{
+        "事件ID": "CXO-2026-001", "一级赛道": "医药/创新药", "二级事件": "业绩验证",
+        "产业链位置": "CXO/CRO", "受益方向": "订单与利润改善",
+        "代表公司类型": "药明康德、康龙化成、昭衍新药", "弹性来源": "订单",
+        "风险点": "业务结构差异", "备注": "来源材料",
+    }]).to_csv(source / "mapping_test.csv", index=False)
+
+    db = tmp_path / "event.db"
+    con = sqlite3.connect(db)
+    con.executescript(module.SCHEMA_SQL)
+    con.execute("INSERT INTO companies(company_name,stock_code) VALUES('康龙化成','300759')")
+    con.commit()
+    con.close()
+    builder = module.EventStoreBuilder(db_path=db, nonfin_dir=source)
+    builder.code_map = {"康龙化成": "300759"}
+    con = sqlite3.connect(db)
+    builder.company_ids = {"康龙化成": con.execute(
+        "SELECT company_id FROM companies WHERE company_name='康龙化成'"
+    ).fetchone()[0]}
+    builder._import_nonfin(con, source)
+    con.commit()
+    con.close()
+    rows = module.EventStore(db).company("300759")
+    assert rows[0]["event_id"] == "CXO-2026-001"
+    assert rows[0]["company_name"] == "康龙化成"
+
+
+def test_csv_rebuild_refuses_to_overwrite_sqlite_primary(tmp_path):
+    module = load_store_module()
+    db = tmp_path / "event.db"
+    con = sqlite3.connect(db)
+    con.executescript(module.SCHEMA_SQL)
+    con.execute("INSERT INTO metadata(key,value) VALUES('build_mode','sqlite_primary')")
+    con.commit()
+    con.close()
+    try:
+        module.build_shadow_database(db_path=db, audit_path=tmp_path / "audit.json")
+    except RuntimeError as exc:
+        assert "拒绝用CSV重建sqlite_primary主库" in str(exc)
+    else:
+        raise AssertionError("CSV rebuild must not overwrite a primary database")
+
+
 def test_pool_benefit_tier_only_downgrades_explicit_theme_wording():
     module = load_store_module()
     assert module.pool_benefit_tier({

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""查询产业事件地图周报CSV，供框架Layer2/3使用。
+"""查询SQLite主事件库，供框架Layer2/3使用。
 
-支持两个数据源：
-  tech   （默认）科技主线  → $TZ_CODEX_HOME/技能数据/科技产业事件/csvMMDD/
-  nonfin          非科技主线 → $TZ_CODEX_HOME/技能数据/非科技产业事件地图/
+支持两个SQLite逻辑数据源：
+  tech   （默认）科技主线
+  nonfin          非科技主线
+
+默认数据库：$TZ_CODEX_HOME/技能数据/event_map_shadow.db。CSV/Excel只保留兼容查询、
+导出和恢复用途，不是events/mapping/forward/corrections/status/window的在线来源。
 
 用法：
   python3 event_map_query.py events --sector AI算力
@@ -31,6 +34,9 @@ WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
     os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
 ))
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
+EVENT_DB = Path(os.environ.get(
+    "EVENT_MAP_DB", os.path.join(DATA_ROOT, "event_map_shadow.db")
+)).expanduser()
 TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
 COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
@@ -42,11 +48,18 @@ if str(REPO_ROOT) not in sys.path:
 
 def _sqlite_store():
     from skills.shared.event_store import EventStore
-    return EventStore()
+    return EventStore(EVENT_DB)
+
+
+def _load_primary_table(source: str, table_name: str) -> tuple[pd.DataFrame, str]:
+    """Load the original table contract from the SQLite primary source."""
+    store = _sqlite_store()
+    rows = store.source_table(source, table_name)
+    return pd.DataFrame(rows), f"sqlite://{store.db_path}#{source}/{table_name}"
 
 
 def _print_sqlite_rows(rows, as_json=False):
-    print("数据源: SQLite影子库")
+    print("数据源: SQLite主库")
     if as_json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
     elif not rows:
@@ -151,7 +164,7 @@ def load_csv(csv_dir, prefix):
 
 
 def query_events(sector_keyword=None, exclude_full_traded=True, source="tech"):
-    df, src = load_csv(find_latest_csv_dir(source), "events")
+    df, src = _load_primary_table(source, "events")
     if sector_keyword:
         df = df[df["一级赛道"].str.contains(sector_keyword, na=False)]
     if exclude_full_traded:
@@ -161,8 +174,7 @@ def query_events(sector_keyword=None, exclude_full_traded=True, source="tech"):
 
 
 def query_mapping(sector_keyword=None, keyword=None, source="tech"):
-    csv_dir = find_latest_csv_dir(source)
-    df, src = load_csv(csv_dir, "mapping")
+    df, src = _load_primary_table(source, "mapping")
 
     if source == "nonfin":
         if sector_keyword:
@@ -190,14 +202,13 @@ def query_mapping(sector_keyword=None, keyword=None, source="tech"):
 
 
 def query_forward(sector_keyword=None, source="tech"):
-    csv_dir = find_latest_csv_dir(source)
-    df, src = load_csv(csv_dir, "forward")
+    df, src = _load_primary_table(source, "forward")
 
     if source == "nonfin":
         # 非科技版 forward 无 一级赛道 列，通过 events 表的事件ID做关联筛选
         if sector_keyword:
             try:
-                ev_df, _ = load_csv(csv_dir, "events")
+                ev_df, _ = _load_primary_table(source, "events")
                 matched_ids = ev_df[
                     ev_df["一级赛道"].str.contains(sector_keyword, na=False)
                 ]["事件ID"].tolist()
@@ -217,7 +228,7 @@ def query_corrections(source="tech"):
     if source == "nonfin":
         return pd.DataFrame({"提示": ["非科技事件地图暂无动态修正清单（corrections），"
                                        "请在事件维护时直接更新 events 表的当前状态字段。"]}), "N/A"
-    df, src = load_csv(find_latest_csv_dir(source), "corrections")
+    df, src = _load_primary_table(source, "corrections")
     cols = [c for c in CORRECTION_COLS if c in df.columns]
     return df[cols], src
 
@@ -488,8 +499,7 @@ def query_catalyst_candidates(source="tech"):
 
 
 def query_status(keyword=None, stage_filter=None, source="tech"):
-    csv_dir = find_latest_csv_dir(source)
-    df, src = load_csv(csv_dir, "sectors_status")
+    df, src = _load_primary_table(source, "sectors_status")
     if keyword:
         mask = pd.Series(False, index=df.index)
         for col in ["theme", "sub_sector", "sector_id", "note"]:
@@ -502,34 +512,21 @@ def query_status(keyword=None, stage_filter=None, source="tech"):
     return df[cols], src
 
 
-def _build_event_company_index():
-    """构建事件ID → A股公司列表的索引（从公司.xlsx的关联事件ID字段）。"""
-    try:
-        tech = pd.read_excel(COMPANY_POOL, sheet_name='科技公司池')
-        nonfin = pd.read_excel(COMPANY_POOL, sheet_name='非科技公司池')
-        all_co = pd.concat([tech, nonfin], ignore_index=True)
-        a_stock = all_co[all_co['市场/属性'].astype(str).str.contains('A股', na=False)]
-    except Exception:
-        return {}
-
-    code_map = get_code_map()
+def _build_event_company_index(source: str, event_ids) -> dict:
+    """构建事件ID → A股公司列表的索引（SQLite主库关系）。"""
+    refs = [(source, str(event_id)) for event_id in event_ids if str(event_id)]
+    rows = _sqlite_store().companies_for_events(refs)
     index: dict = {}
-    for _, row in a_stock.iterrows():
-        event_ids_str = str(row.get('关联事件ID', ''))
-        if not event_ids_str or event_ids_str == 'nan':
-            continue
-        name = str(row.get('公司名称', ''))
-        code = code_map.get(name, '')
-        sub2 = str(row.get('二级环节', ''))
-        role = str(row.get('角色', ''))
-        for eid in event_ids_str.replace('；', ';').replace('，', ';').split(';'):
-            eid = eid.strip()
-            if not eid:
-                continue
-            index.setdefault(eid, []).append({
-                'name': name, 'code': code,
-                'sub2': sub2, 'role': role,
-            })
+    for row in rows:
+        event_id = str(row.get("event_id", ""))
+        index.setdefault(event_id, []).append({
+            "name": row.get("company_name", ""),
+            "code": row.get("stock_code", ""),
+            "sub2": row.get("role_2", ""),
+            "role": row.get("role_3", ""),
+            "relation_status": row.get("relation_status", ""),
+            "benefit_tier": row.get("benefit_tier", ""),
+        })
     return index
 
 
@@ -551,7 +548,7 @@ def compute_scored_events(source="tech", sector=None):
     if events_df.empty:
         return [], src
 
-    company_index = _build_event_company_index()
+    company_index = _build_event_company_index(source, events_df["事件ID"].tolist())
 
     activation_dates = {}
     try:
@@ -685,7 +682,7 @@ def main():
     p_company = sub.add_parser("company", help="查公司归属赛道（输入公司名/代码/关键词）")
     p_company.add_argument("keyword", help="公司名称或关键词，如 雅克科技 / 前驱体 / 光模块")
 
-    # SQLite影子期新增命令：不改变既有company/events/mapping等CSV命令语义。
+    # SQLite结构化查询入口。旧CSV查询命令暂留作兼容读取，不得用于写入。
     p_db_company = sub.add_parser("db-company", help="从SQLite查询公司产业角色与关联催化")
     p_db_company.add_argument("keyword", help="公司名称或股票代码")
     p_db_company.add_argument("--json", action="store_true")

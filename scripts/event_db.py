@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Build and query the event-map SQLite shadow database."""
+"""Query and inspect the SQLite-primary event map.
+
+The physical filename still contains ``shadow`` for backward compatibility;
+the metadata ``build_mode`` field is the authoritative source of truth.
+"""
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -91,12 +96,43 @@ def compare(store, mode, keyword):
     }
 
 
+def database_status(db_path):
+    path = Path(db_path)
+    if not path.exists():
+        return {"status": "missing", "db_path": str(path)}
+    con = sqlite3.connect(path)
+    try:
+        metadata = dict(con.execute("SELECT key,value FROM metadata").fetchall())
+        integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+        foreign_key_errors = len(con.execute("PRAGMA foreign_key_check").fetchall())
+        counts = {}
+        for table in ("events", "companies", "company_event_links", "forward_events", "source_rows"):
+            exists = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if exists:
+                counts[table] = con.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
+        mode = metadata.get("build_mode", "unknown")
+        return {
+            "status": "ok" if integrity == "ok" and foreign_key_errors == 0 else "invalid",
+            "write_source": "SQLite唯一主库" if mode == "sqlite_primary" else "非正式主库模式",
+            "build_mode": mode,
+            "db_path": str(path),
+            "integrity": integrity,
+            "foreign_key_errors": foreign_key_errors,
+            "counts": counts,
+            "built_at": metadata.get("built_at"),
+        }
+    finally:
+        con.close()
+
+
 def main():
-    parser = argparse.ArgumentParser(description="事件地图SQLite影子库")
+    parser = argparse.ArgumentParser(description="事件地图SQLite主库查询与检查")
     parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite路径")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_build = sub.add_parser("build", help="从最新CSV/Excel重建影子库")
+    p_build = sub.add_parser("build", help="仅用于临时恢复演练：从CSV/Excel构建指定SQLite文件")
     p_build.add_argument("--audit-output", default=str(DEFAULT_AUDIT))
     p_build.add_argument("--json", action="store_true")
 
@@ -117,27 +153,41 @@ def main():
     p_audit = sub.add_parser("audit", help="查询导入异常摘要")
     p_audit.add_argument("--json", action="store_true")
 
-    p_migration = sub.add_parser("migration-status", help="查看主库切换的真实材料更新轮次")
+    p_status = sub.add_parser("status", help="检查SQLite主库身份、完整性和核心行数")
+    p_status.add_argument("--json", action="store_true")
+
+    p_migration = sub.add_parser("migration-status", help="历史命令：查看切换前迁移观察轮次")
     p_migration.add_argument("--json", action="store_true")
 
-    p_cmp = sub.add_parser("compare", help="SQLite与旧公司池双读比较")
+    p_cmp = sub.add_parser("compare", help="历史验收命令：SQLite与旧导出公司池比较")
     p_cmp.add_argument("mode", choices=["company", "sector"])
     p_cmp.add_argument("keyword")
     p_cmp.add_argument("--json", action="store_true")
 
     args = parser.parse_args()
     if args.cmd == "build":
+        current = database_status(args.db)
+        if Path(args.db).resolve() == Path(DEFAULT_DB).resolve() and current.get("build_mode") == "sqlite_primary":
+            parser.error(
+                "默认路径已是SQLite唯一主库，禁止从CSV覆盖。恢复演练请用 --db 指定临时文件；"
+                "正式写入请使用 event_db_cutover.py apply。"
+            )
         report = build_shadow_database(args.db, args.audit_output)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
-            print(f"影子库已构建: {args.db}")
+            print(f"恢复演练数据库已构建: {args.db}")
             print(f"审计报告: {args.audit_output}")
             print(json.dumps({
                 "coverage": report["coverage"],
                 "table_counts": report["counts"],
                 "anomalies": report["anomalies"],
             }, ensure_ascii=False, indent=2))
+        return
+
+    if args.cmd == "status":
+        payload = database_status(args.db)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
     if args.cmd == "migration-status":

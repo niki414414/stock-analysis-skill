@@ -2,7 +2,7 @@
 """三类交易任务的统一扫描入口。
 
 任务：
-  short-ma5       涨停激活＋MA10稳态/MA5稳升，计划持有1-2天，不进入六层。
+  short-ma5       推土机：涨停激活＋自适应趋势分层＋低吸执行，计划隔夜，不进入六层。
   catalyst-swing  催化趋势波段，计划持有15-30天，候选进入六层队列。
   quality-core    质量复利底仓，计划持有3-6个月以上，候选进入六层队列。
 
@@ -12,10 +12,12 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import subprocess
 import sys
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,7 +31,7 @@ CORE_SCRIPT = REPO_ROOT / "skills/quality-compounder/references/quality_compound
 
 TASK_ALIASES = {
     "short-ma5": "short-ma5", "short": "short-ma5", "ma5": "short-ma5",
-    "短线": "short-ma5", "短线低吸": "short-ma5",
+    "短线": "short-ma5", "短线低吸": "short-ma5", "推土机": "short-ma5",
     "catalyst-swing": "catalyst-swing", "swing": "catalyst-swing",
     "波段": "catalyst-swing", "催化波段": "catalyst-swing",
     "quality-core": "quality-core", "core": "quality-core",
@@ -62,10 +64,64 @@ def run_json_command(command: list[str], timeout: int = 1800) -> Any:
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise RuntimeError(f"扫描器失败（exit={completed.returncode}）：{detail[-2000:]}")
+    for line in completed.stderr.splitlines():
+        if "[WARNING]" in line or "[ERROR]" in line:
+            print(f"{Path(command[1]).name}: {line}", file=sys.stderr)
     try:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"扫描器没有返回合法JSON：{completed.stdout[-1000:]}") from exc
+
+
+def short_reference_bid(row: dict) -> dict:
+    """Give a quotable example inside the existing experimental 50%-75% band.
+
+    This is a display aid, not an additional stock selection or fill signal.
+    """
+    if not row.get("auction_band_valid"):
+        return {"reference_bid": None, "confirmation_low": None, "confirmation_high": None}
+    low = Decimal(str(row["auction_reference_low"]))
+    high = Decimal(str(row["auction_reference_high"]))
+    tick = Decimal("0.01")
+    if high < low:
+        return {"reference_bid": None, "confirmation_low": None, "confirmation_high": None}
+    width = high - low
+    band_low = low + width * Decimal("0.50")
+    band_high = low + width * Decimal("0.75")
+    first = (band_low / tick).to_integral_value(rounding=ROUND_CEILING) * tick
+    last = (band_high / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
+    if first > last:
+        return {"reference_bid": None, "confirmation_low": None, "confirmation_high": None}
+    target = low + width * Decimal("0.625")
+    bid = (target / tick).to_integral_value(rounding=ROUND_HALF_UP) * tick
+    bid = min(max(bid, first), last)
+    return {"reference_bid": float(bid), "confirmation_low": float(first), "confirmation_high": float(last)}
+
+
+def short_execution_plan(row: dict) -> str:
+    """Return scenario-based auction guidance; never print NaN price levels."""
+    band_valid = row.get("auction_band_valid")
+    if band_valid is None:
+        band_valid = row.get("auction_low25") is not None or row.get("auction_reference_low") is not None
+    if not band_valid:
+        return (
+            "昨收与次日MA5临界价之间没有合规报价空间，保留为趋势观察标的；"
+            "不倒置区间机械挂单；9:25核对结果，未成交委托在可撤时发起撤单并等待确认"
+        )
+    quote = short_reference_bid(row)
+    price_text = (
+        f"试验限价买入报价上限{quote['reference_bid']:.2f}元；可报价确认带"
+        f"{quote['confirmation_low']:.2f}—{quote['confirmation_high']:.2f}元；"
+        if quote["reference_bid"] is not None else "确认带内无可报价价位，竞价不预埋；"
+    )
+    return (
+        price_text +
+        f"理论临界价{row.get('next_ma5_threshold')}元，昨收{row.get('close')}元；"
+        "该报价是买入限价，不保证按此价格成交；若集合竞价成交价更低，仍可能以更低价成交；"
+        "默认先观察9:25开盘结果，9:30后重算动态MA5并确认承接，再决定是否委托；收盘后报价不能机械照搬。"
+        "只有主动接受低价成交及撤单延迟风险时，才考虑9:20—9:25预埋；"
+        "未成交单可能进入连续竞价，撤单须以券商回报为准"
+    )
 
 
 def normalize_short(rows: list[dict]) -> list[dict]:
@@ -75,14 +131,15 @@ def normalize_short(rows: list[dict]) -> list[dict]:
         normalized.append({
         "trade_date": row.get("trade_date"), "task": "short-ma5",
         "code": row.get("ts_code"), "name": row.get("name"),
-        "candidate_reason": "近期涨停激活＋MA10稳态/MA5稳升：" + str(row.get("signal") or "未标记"),
-        "holding_period": "1-2天", "market_gate": "短线情绪闸门待盘前确认",
+        "candidate_reason": "推土机双通道：" + str(row.get("selection_lane") or "待分层"),
+        "holding_period": "隔夜；买入后的下一交易日闭环", "market_gate": "推土机市场闸门待盘前确认",
         "strategy_score": None,
-        "current_state": f"{row.get('signal') or '—'}；{row.get('risk_tier') or '—'}；活跃排名{row.get('activity_rank') or '—'}",
-        "next_action": f"按低吸规则观察，次日MA5临界价约{row.get('next_ma5_threshold')}；盘中确认后才授权",
+        "current_state": f"{row.get('continuity_tier') or '持续性待分层'}；{row.get('signal') or '—'}；{row.get('trend_stage') or '—'}；{row.get('risk_tier') or '—'}；活跃排名{row.get('activity_rank') or '—'}",
+        "next_action": short_execution_plan(row),
         "needs_six_layer": False, "risk_flags": row.get("risk_flags", ""),
         "chart_teaching": hints,
         "execution_state": "待人工确认",
+        "price_plan": short_reference_bid(row),
         "source_script": SHORT_SCRIPT.name,
         "details": row,
         })
@@ -95,7 +152,18 @@ def short_chart_teaching(row: dict) -> dict[str, str]:
     days = row.get("days_since_limit_up")
     bias = row.get("bias_ma5_pct")
     volume_ratio = row.get("volume_ratio_5_20")
-    if signal == "S1+S2":
+    trend_stage = row.get("trend_stage")
+    trend_days = row.get("consecutive_days_above_ma5")
+    lane = row.get("selection_lane")
+    if lane == "完全均线型":
+        structure = "均线发散、贴MA5且推进较均匀；仍需肉眼排查异常K线"
+    elif lane == "活跃兼顾型":
+        structure = "满足共同上升底线并偏重成交与振幅；均线连续性弱于完全均线型"
+    elif lane == "双通道":
+        structure = "同时进入完全均线与活跃通道，结构和活跃度相对均衡"
+    elif signal == "E2_MA5_EARLY":
+        structure = "MA5上方仅形成早期结构，属于边缘观察"
+    elif signal == "S1+S2":
         structure = "MA5稳升且连续站在MA10上，属于推土机式稳定推进形态"
     elif signal == "S1_MA10_STABLE":
         structure = "仍守MA10平台，但MA5推进不足；看回踩后能否重新提速"
@@ -110,13 +178,31 @@ def short_chart_teaching(row: dict) -> dict[str, str]:
         position = "MA5距离待核验"
     if isinstance(volume_ratio, (int, float)):
         activity = f"近5日/20日均量比{volume_ratio:.2f}倍：" + ("资金活跃" if volume_ratio >= 1.2 else "活跃度一般，盘中需看到放量")
+        activity += f"；{row.get('volume_observation') or '倍量状态待核验'}"
     else:
         activity = "量能活跃度待核验"
     risk = row.get("risk_flags") or "未触发脚本风险标记；仍需看板块和分时承接"
     theme = row.get("limit_theme") or row.get("industry") or "待人工核验"
     reason = row.get("limit_up_reason") or "数据源未提供，盘前需人工核验"
+    if isinstance(trend_days, int):
+        duration = f"连续{trend_days}日站在MA5上，阶段={trend_stage or '待分层'}；2/5/8/16日均非固定公式"
+    else:
+        duration = "趋势持续日数待核验"
+    low = row.get("auction_reference_low")
+    high = row.get("auction_reference_high")
+    quote = short_reference_bid(row)
+    if row.get("auction_band_valid"):
+        auction = (
+            f"合规报价区间{low}—{high}；"
+            + (f"试验参考报价{quote['reference_bid']:.2f}元，确认带{quote['confirmation_low']:.2f}—{quote['confirmation_high']:.2f}元；"
+               if quote["reference_bid"] is not None else "确认带内无可报价价位；")
+            + "默认先看9:25开盘结果，9:30后重算动态MA5并确认承接；预埋限价单可能低于报价成交，未成交单可能进入连续竞价"
+        )
+    else:
+        auction = "昨收与次日MA5临界价之间没有合规报价空间；不能倒置区间机械挂单"
     return {
-        "形态": structure, "启动": activation, "位置": position, "量能": activity,
+        "形态": structure, "趋势阶段": duration, "启动": activation, "位置": position, "量能": activity,
+        "竞价计划": auction,
         "板块身份": str(theme), "涨停原因": str(reason), "风险": risk,
     }
 
@@ -139,7 +225,7 @@ def classify_short_activity(details: dict) -> tuple[int, str]:
 
 def normalize_swing(rows: list[dict]) -> list[dict]:
     return [{
-        "trade_date": None, "task": "catalyst-swing",
+        "trade_date": row.get("trade_date"), "task": "catalyst-swing",
         "code": row.get("code"), "name": row.get("name"),
         "candidate_reason": row.get("event_name") or "活跃催化关联候选",
         "holding_period": "15-30天",
@@ -199,12 +285,21 @@ def select_focus(task: str, rows: list[dict], limit: int = 5) -> list[dict]:
             near_ma5 = isinstance(bias, (int, float)) and abs(bias) <= 3
             days_since_limit = details.get("days_since_limit_up")
             just_limit_up = days_since_limit == 0
+            early_experimental = details.get("signal") == "E2_MA5_EARLY"
             close = details.get("close")
             low_price = isinstance(close, (int, float)) and close <= 20
             activity_tier, activity_reason = classify_short_activity(details)
+            continuity_tier = {
+                "A_持续强势": 0,
+                "B_结构合格待确认": 1,
+                "C_活跃观察": 2,
+            }.get(details.get("continuity_tier"), 2)
             if just_limit_up:
                 activity_tier, shape_tier = 3, 3
                 reason = "当日刚涨停，不列为次日低吸优先；等待分歧后的新机会"
+            elif early_experimental:
+                activity_tier, shape_tier = max(activity_tier, 2), 2
+                reason = "两日早期试验层；仅在非退潮环境小仓观察，不与5/8/16日成熟趋势同档"
             elif is_a and no_large_bearish and near_ma5:
                 shape_tier = 0
                 reason = activity_reason + "；A档且贴近MA5"
@@ -217,7 +312,7 @@ def select_focus(task: str, rows: list[dict], limit: int = 5) -> list[dict]:
             activity_rank = details.get("activity_rank")
             activity_rank = activity_rank if isinstance(activity_rank, int) else 9999
             price_tiebreak = 0 if low_price else 1
-            tier = (activity_tier, shape_tier, activity_rank, price_tiebreak)
+            tier = (continuity_tier, activity_tier, shape_tier, activity_rank, price_tiebreak)
         elif task == "catalyst-swing":
             state = row.get("current_state")
             repair = details.get("sector_repair_state")
@@ -245,7 +340,7 @@ def write_report(
     results: dict[str, list[dict]], focus: dict[str, list[dict]], path: Path, generated_at: str,
 ) -> None:
     labels = {
-        "short-ma5": "涨停激活＋MA10稳态/MA5稳升短线池",
+        "short-ma5": "推土机短线池（涨停激活＋自适应趋势分层）",
         "catalyst-swing": "催化趋势波段池",
         "quality-core": "质量复利底仓池",
     }
@@ -266,7 +361,7 @@ def write_report(
         if task == "short-ma5":
             lines += [
                 "", "### 次日人工确认（当前数据不能替代）", "",
-                "只在目标板块没有退潮、个股未高开超过计划上限、回踩MA5/MA10有承接并重新站回分时均价时，才允许小仓试错。无法确认则不交易。", "",
+                "收盘后生成次日MA5临界价、可报价确认带和一个具体的试验报价。报价是限价买入上限，不是保证成交价。默认9:25观察开盘结果，9:30后确认止跌承接再决定是否委托；若9:20—9:25预埋，须事先接受集合竞价可能以低于报价的价格成交且该时段不能撤单。未成交委托可能进入连续竞价；撤单只有收到券商确认才算完成。黄色环境不做预埋，红色停止新开仓。确认带和报价仍需更长样本及竞价数据验证。", "",
             ]
             lines += ["### 前5图形教学提示", ""]
             for row in focus.get(task, []):
@@ -275,10 +370,11 @@ def write_report(
             lines.append("")
             lines += [
                 "### 30秒盘中确认卡", "",
-                "- □ 市场未进入明显退潮，跌停没有快速扩散。",
-                "- □ 候选所属题材至少有两只以上同步转强，不是单股孤涨。",
-                "- □ 个股没有超过计划高开上限，也不是直线拉升后追价。",
-                "- □ 计划位置出现承接，并在承接之后重新站回分时均价。",
+                "- □ 默认等9:25开盘结果，9:30后再按承接决定；预埋只限昨日绿灯且今早跌停未扩散，并接受低价成交与不可撤单风险。",
+                "- □ 候选所属题材相对市场更强且有正常成交的跟随；不机械以‘至少两只上涨’替代扩散判断，独立事件另行核验。",
+                "- □ 参考报价严格低于昨收、高于次日MA5临界价；它是买入限价上限，不保证成交价或避免更低价成交。",
+                "- □ 未成交单若需撤销，已收到券商撤单确认；确认前不得下第二笔。",
+                "- □ 原版只认低开下杀；止跌收回次日MA5临界价，第一次回踩不破临界价或前低，并出现成交改善或相对强势。",
                 "- □ 已写好失效价、首笔仓位和最迟退出日。",
                 "任一项不能确认：不下单。", "",
                 "### 次日退出三情景", "",
@@ -297,6 +393,41 @@ def write_report(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def write_short_html_report(rows: list[dict], focus: list[dict], path: Path, generated_at: str) -> None:
+    """Readable copy of the same short-list evidence, without changing ranking."""
+    esc = lambda value: html.escape(str(value if value is not None else "—"))
+    cards = []
+    for row in focus:
+        plan = row.get("price_plan") or {}
+        bid = plan.get("reference_bid")
+        price = f"{bid:.2f} 元" if bid is not None else "无有效参考报价"
+        cards.append(
+            f"<article><h2>{esc(row['name'])} <small>{esc(row['code'])}</small></h2>"
+            f"<p class='price'>{esc(price)}</p>"
+            f"<p><strong>筛选状态：</strong>{esc(row.get('current_state'))}</p>"
+            f"<p><strong>关注原因：</strong>{esc(row.get('focus_reason'))}</p>"
+            f"<p><strong>价格与执行：</strong>{esc(row.get('next_action'))}</p></article>"
+        )
+    all_rows = "".join(
+        f"<tr><td>{esc(row['code'])}</td><td>{esc(row['name'])}</td>"
+        f"<td>{esc((row.get('price_plan') or {}).get('reference_bid'))}</td>"
+        f"<td>{esc(row.get('current_state'))}</td></tr>"
+        for row in rows
+    )
+    page = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>推土机短线观察池</title>
+<style>body{{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;background:#f3f5f6;color:#182530;margin:0;padding:25px 16px}}
+main{{max-width:900px;margin:auto}}h1{{font-size:29px}}.meta{{color:#65747d}}.notice,article,.list{{background:white;border-radius:12px;padding:20px 24px;margin:16px 0;box-shadow:0 5px 20px #2030400d}}
+.notice{{border-left:4px solid #188458}}article h2{{margin:0}}small{{color:#687780;font-size:14px}}.price{{color:#126e55;font-weight:700;font-size:25px;margin:10px 0}}
+p{{line-height:1.7}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:10px;border-bottom:1px solid #e5eaed;vertical-align:top}}@media(max-width:650px){{td,th{{font-size:13px}}}}</style></head><body><main>
+<h1>推土机短线观察池</h1><p class="meta">生成时间 {esc(generated_at)} · 数据日期 {esc(rows[0]['trade_date'] if rows else '—')} · 共 {len(rows)} 只</p>
+<div class="notice"><strong>先看结论：</strong>以下价格是收盘后生成的试验买入限价上限，不是成交保证。默认观察集合竞价，9:25核对开盘，9:30后重算动态MA5并确认承接，再决定是否委托。未成交单可能进入连续竞价，撤单以券商确认回报为准。</div>
+<h2>盘前重点核查</h2>{''.join(cards)}<div class="list"><h2>完整观察池</h2>
+<table><thead><tr><th>代码</th><th>名称</th><th>试验参考价（元）</th><th>当前状态</th></tr></thead><tbody>{all_rows}</tbody></table></div>
+</main></body></html>"""
+    path.write_text(page, encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="短线、催化波段、质量底仓统一交易任务入口")
     parser.add_argument("--task", required=True, choices=sorted(TASK_ALIASES))
@@ -311,8 +442,8 @@ def main() -> None:
         raise SystemExit("目前--as-of只对short-ma5生效；催化波段和质量底仓使用各自最新数据。")
 
     generated_at = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = args.output_dir or WORKSPACE_ROOT / "分析记录" / "策略任务" / generated_at
-    # 子扫描器在 REPO_ROOT 下执行；相对输出路径会被错误写到 repo/分析记录，
+    run_dir = args.output_dir or WORKSPACE_ROOT / "技能数据" / "运行记录" / "策略任务" / generated_at
+    # 子扫描器在 REPO_ROOT 下执行；相对输出路径会被错误写到repo目录，
     # 而路由器随后从工作区根目录读取。统一转成绝对路径，保证写入与读取同址。
     if not run_dir.is_absolute():
         run_dir = (WORKSPACE_ROOT / run_dir).resolve()
@@ -328,11 +459,15 @@ def main() -> None:
     report_path = run_dir / "strategy_tasks.md"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     write_report(results, focus, report_path, generated_at)
+    html_path = run_dir / "strategy_tasks.html"
+    if task == "short-ma5":
+        write_short_html_report(results[task], focus[task], html_path, generated_at)
     print(json.dumps({
         "generated_at": generated_at,
         "counts": {key: len(value) for key, value in results.items()},
         "focus_counts": {key: len(value) for key, value in focus.items()},
-        "report": str(report_path), "json": str(json_path),
+        "report": str(report_path), "html": str(html_path) if task == "short-ma5" else None,
+        "json": str(json_path),
     }, ensure_ascii=False))
 
 

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""event_map_updater.py — 产业事件地图写入/导出/迁移工具。
+"""event_map_updater.py — 产业事件地图旧格式校验与兼容辅助工具。
 
-与 event_map_query.py（只读）配合，本脚本负责所有写入操作：
-  status    显示当前数据库状态
-  apply     从JSON增量更新CSV
+正式写入只允许使用 scripts/event_db_cutover.py apply。本脚本保留：
+  status    显示最新兼容CSV导出批次
   export-excel  从CSV生成合并Excel
   migrate   生成迁移包（科技+非科技+公司池+脚本）
   validate  跨表一致性检查
@@ -12,7 +11,6 @@
 
 用法：
   python3 event_map_updater.py status
-  python3 event_map_updater.py apply --date 0621 --label weekly --changes /tmp/changes.json
   python3 event_map_updater.py export-excel --output ~/Desktop/tz/技能数据/科技产业事件/621.xlsx
   python3 event_map_updater.py migrate --output ~/Desktop/tz/技能数据/迁移包_20260621
   python3 event_map_updater.py validate
@@ -37,6 +35,7 @@ WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
 REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+from skills.shared.event_store import DEFAULT_DB, EventStore
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
 TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
@@ -110,11 +109,9 @@ TECH_TABLES = {
         "prefix": "sectors_status",
         "id_col": "sector_id",
         # 2026-07-22精简：删除wave_number/wave_position/catalyst_quality/
-        # ai_correlation/priority/style_position——排查发现这6个字段在现行框架里
-        # 零消费方（只被已归档的analysis-prompt-template-v2.md和已下线的
-        # top_picks_screener.py引用，见feedback_sectors_status_sync_redesign）。
-        # stage保留：output-format-template.md仍用它做展示+过时性自查（非决策输入，
-        # analysis-prompt-template.md的破位升级路径①已改用corrections表+活跃催化）。
+        # ai_correlation/priority/style_position——这些字段在现行框架里没有消费方。
+        # 旧top_picks_screener及其专属模板已归档。stage仅作为数据兼容与人工
+        # 过时性检查字段保留，不参与现行选股决策。
         "cols": ["sector_id", "theme", "sub_sector", "stage",
                  "signal_stock_code", "event_map_status", "last_updated", "note"],
     },
@@ -139,6 +136,14 @@ NONFIN_TABLES = {
         "id_col": None,
         "cols": ["事件ID", "观察周期", "关键日期/窗口", "观察指标", "验证逻辑",
                  "可能结果", "跟踪优先级", "备注"],
+    },
+    "signals_early": {
+        "prefix": "signals_early",
+        "id_col": "signal_id",
+        "cols": ["signal_id", "signal_date", "event_id", "对应事件", "signal_stage",
+                 "早期信号内容", "产业链环节", "代表公司/公司类型", "later_validation",
+                 "market_trade_status", "confidence_level", "source_type", "source_ref",
+                 "风险/修正说明", "最新更新时间"],
     },
     "sources": {
         "prefix": "sources",
@@ -233,7 +238,7 @@ def cmd_status(source="tech"):
         else:
             info["tables"][tname] = {"rows": 0, "cols": 0, "file": None}
 
-    print(f"当前主库: {os.path.basename(csv_dir)}  日期: {date}  源: {source}")
+    print(f"最新兼容CSV批次: {os.path.basename(csv_dir)}  日期: {date}  源: {source}")
     print(f"路径: {csv_dir}\n")
     for tname, tinfo in info["tables"].items():
         status = f"{tinfo['rows']}行 {tinfo['cols']}列" if tinfo["file"] else "缺失"
@@ -398,146 +403,9 @@ def _apply_deletions(df, tname, tdef, deletion_list):
 
 
 def cmd_apply(source, date_short, label, changes_path):
-    # SQLite主库启用后，禁止旧CSV写入入口继续制造双主。
-    shadow_db = os.path.join(DATA_ROOT, "event_map_shadow.db")
-    if os.path.exists(shadow_db):
-        import sqlite3
-        try:
-            con = sqlite3.connect(shadow_db)
-            row = con.execute("SELECT value FROM metadata WHERE key='build_mode'").fetchone()
-            con.close()
-            if row and row[0] == "sqlite_primary":
-                raise RuntimeError(
-                    "SQLite已是唯一事实源；禁止CSV反向写入。请改用 scripts/event_db_cutover.py apply"
-                )
-        except sqlite3.OperationalError:
-            pass
-    with open(changes_path, encoding="utf-8") as f:
-        changes = json.load(f)
-
-    additions = changes.get("additions", {})
-    _validate_addition_ids(source, additions)
-
-    new_dir = create_new_version(source, date_short, label)
-    tables = get_tables(source)
-    summary = {}
-
-    for tname, new_rows in additions.items():
-        if not new_rows or tname not in tables:
-            continue
-        tdef = tables[tname]
-        df, fpath = load_csv(new_dir, tdef["prefix"])
-        if df is None:
-            df = pd.DataFrame(columns=tdef["cols"])
-            fpath = os.path.join(new_dir, f"{tdef['prefix']}_{date_short}_{label}.csv")
-
-        new_df = pd.DataFrame(new_rows)
-        for col in tdef["cols"]:
-            if col not in new_df.columns:
-                new_df[col] = ""
-        new_df = new_df[[c for c in tdef["cols"] if c in new_df.columns]]
-        new_df = _autofill_ids(tname, tdef, df, new_df, date_short)
-
-        df = pd.concat([df, new_df], ignore_index=True)
-        df.to_csv(fpath, index=False, encoding="utf-8-sig")
-        summary[tname] = summary.get(tname, {"added": 0, "updated": 0, "deleted": 0})
-        summary[tname]["added"] += len(new_rows)
-
-    updates = changes.get("updates", {})
-    for tname, update_list in updates.items():
-        if not update_list or tname not in tables:
-            continue
-        tdef = tables[tname]
-        id_col = tdef.get("id_col")
-        if not id_col:
-            print(f"  警告: {tname} 无主键列，跳过update操作")
-            continue
-        df, fpath = load_csv(new_dir, tdef["prefix"])
-        if df is None:
-            continue
-
-        for upd in update_list:
-            id_val = upd.get("id_value")
-            fields = upd.get("fields", {})
-            mask = df[id_col].astype(str) == str(id_val)
-            if mask.sum() == 0:
-                print(f"  警告: {tname} 中未找到 {id_col}={id_val}")
-                continue
-            for col, val in fields.items():
-                if col in df.columns:
-                    df.loc[mask, col] = val
-            summary[tname] = summary.get(tname, {"added": 0, "updated": 0, "deleted": 0})
-            summary[tname]["updated"] += 1
-
-        df.to_csv(fpath, index=False, encoding="utf-8-sig")
-
-    deletions = changes.get("deletions", {})
-    for tname, deletion_list in deletions.items():
-        if not deletion_list or tname not in tables:
-            continue
-        tdef = tables[tname]
-        df, fpath = load_csv(new_dir, tdef["prefix"])
-        if df is None:
-            print(f"  警告: {tname} 表不存在，跳过deletion操作")
-            continue
-        df, deleted = _apply_deletions(df, tname, tdef, deletion_list)
-        if deleted:
-            df.to_csv(fpath, index=False, encoding="utf-8-sig")
-            summary[tname] = summary.get(tname, {"added": 0, "updated": 0, "deleted": 0})
-            summary[tname]["deleted"] += deleted
-
-    print(f"\n变更已应用到: {new_dir}")
-    for tname, s in summary.items():
-        print(f"  {tname}: +{s.get('added', 0)}新增, ~{s.get('updated', 0)}更新, "
-              f"-{s.get('deleted', 0)}删除")
-
-    # 公司池同步：不再是SKILL.md里"记得手动做"的一步，apply时自动跑。
-    pool_summary = sync_company_pool(source, mapping_rows=additions.get("mapping"), date_short=date_short)
-    if pool_summary["added"] or pool_summary["skipped_no_code"]:
-        print(f"\n公司池同步: +{pool_summary['added']}家新增, "
-              f"{len(pool_summary['skipped_no_code'])}家无A股代码跳过"
-              f"{'(' + '、'.join(pool_summary['skipped_no_code'][:5]) + ')' if pool_summary['skipped_no_code'] else ''}")
-
-    # sectors_status同步：2026-07-22新增，替代此前"改事件地图时记得手动同步
-    # sectors_status.csv"这一步——那一步从2026-06-18写进设计文档起就只是prompt
-    # 提醒，从未真正代码强制过，导致76个赛道里62个的signal_stock_code/
-    # event_map_status从建档起就没更新过。sectors_status目前只有tech source。
-    if source == "tech":
-        sectors_summary = sync_sectors_status(
-            mapping_rows=additions.get("mapping"),
-            events_rows=additions.get("events"),
-            date_short=date_short,
-            new_dir=new_dir,
-        )
-        if sectors_summary["updated_sectors"]:
-            print(f"\nsectors_status同步: {len(sectors_summary['updated_sectors'])}个赛道"
-                  f"自动补充signal_stock_code/event_map_status "
-                  f"({'、'.join(sectors_summary['updated_sectors'])})")
-        if sectors_summary["flagged_for_review"]:
-            print(f"  stage/wave/priority为判断字段，不自动改，以下赛道有新催化命中，建议人工复核：")
-            for f in sectors_summary["flagged_for_review"]:
-                print(f"    {f['sector_id']}（{f['sub_sector']}）当前stage={f['current_stage']}"
-                      f" 匹配公司:{f['matched_companies']}")
-
-    # 影子期：CSV仍是写入主源，每次apply后自动重建SQLite投影。
-    # 失败只告警，不回滚已经验证过的CSV更新；切换为SQLite主库前再收紧为事务级失败。
-    try:
-        from skills.shared.event_store import build_shadow_database, record_shadow_update_cycle
-        db_audit = build_shadow_database()
-        migration_history = record_shadow_update_cycle(db_audit, {
-            "source": source, "date_short": date_short, "label": label,
-            "changes_path": os.path.abspath(changes_path),
-        })
-        print(f"\nSQLite影子库: ✓ 已重建 "
-              f"(events={db_audit['counts'].get('events', 0)}, "
-              f"company_event_links={db_audit['counts'].get('company_event_links', 0)}, "
-              f"anomalies={db_audit['counts'].get('import_anomalies', 0)})")
-        print(f"迁移观察轮次: {migration_history['completed_unique_cycles']}/"
-              f"{migration_history['required_unique_cycles']}（仅唯一材料快照计数）")
-    except Exception as exc:
-        print(f"\nSQLite影子库: ⚠️ 重建失败，不影响CSV主库: {exc}")
-
-    return new_dir, summary
+    raise RuntimeError(
+        "旧CSV写入函数已永久停用；请使用 scripts/event_db_cutover.py apply 写入SQLite主库"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -796,14 +664,17 @@ SECTOR_ID_PREFIX = {
 
 
 def cmd_next_ids(source, table, count=5, sector=None, date=None):
-    csv_dir = find_latest_csv_dir(source)
     tables = get_tables(source)
     tdef = tables.get(table)
     if not tdef or not tdef.get("id_col"):
         print(f"表 {table} 无ID列")
         return []
 
-    df, _ = load_csv(csv_dir, tdef["prefix"])
+    if os.path.exists(DEFAULT_DB):
+        df = pd.DataFrame(EventStore(DEFAULT_DB).source_table(source, table))
+    else:
+        csv_dir = find_latest_csv_dir(source)
+        df, _ = load_csv(csv_dir, tdef["prefix"])
     if date is None:
         date = datetime.now().strftime("%Y%m%d")
 
@@ -825,7 +696,7 @@ def cmd_next_ids(source, table, count=5, sector=None, date=None):
             "mapping": "MAP", "forward": "FWD",
             "sources": "SRC", "signals_early": "SIG",
         }
-        pfx = prefix_map[table]
+        pfx = "NF-SIG" if source == "nonfin" and table == "signals_early" else prefix_map[table]
         pattern = re.compile(rf"^{pfx}-{date}-(\d+)$")
         max_num = 0
         for eid in existing_ids:
@@ -982,6 +853,7 @@ def cmd_export_excel(source="tech", csv_dir=None, output_path=None):
                 "mapping": "产业链映射",
                 "forward": "前瞻验证",
                 "sources": "来源记录",
+                "signals_early": "早期信号追踪",
             }
 
         for tname, sheet_name in sheet_map.items():
@@ -1185,14 +1057,8 @@ def main():
     parser = argparse.ArgumentParser(description="产业事件地图更新工具")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_status = sub.add_parser("status", help="显示当前数据库状态")
+    p_status = sub.add_parser("status", help="显示最新兼容CSV导出批次（不是主库状态）")
     p_status.add_argument("--source", choices=["tech", "nonfin"], default="tech")
-
-    p_apply = sub.add_parser("apply", help="应用JSON变更到CSV")
-    p_apply.add_argument("--source", choices=["tech", "nonfin"], default="tech")
-    p_apply.add_argument("--date", required=True, help="版本日期 MMDD（如0621）")
-    p_apply.add_argument("--label", required=True, help="版本标签（如weekly_update）")
-    p_apply.add_argument("--changes", required=True, help="变更JSON文件路径")
 
     p_excel = sub.add_parser("export-excel", help="从CSV生成合并Excel")
     p_excel.add_argument("--source", choices=["tech", "nonfin"], default="tech")
@@ -1209,7 +1075,7 @@ def main():
         help="额外报告未进入events主表的候选/外部引用（仅提示，不计结构错误）",
     )
 
-    p_sync = sub.add_parser("sync-pool", help="手动重跑公司池同步（正常由apply自动触发，仅用于补录/调试）")
+    p_sync = sub.add_parser("sync-pool", help="按变更包同步兼容公司.xlsx（仅在旧读取方确有需要时使用）")
     p_sync.add_argument("--source", choices=["tech", "nonfin"], default="tech")
     p_sync.add_argument("--changes", required=True, help="变更JSON文件路径（读取其中的mapping新增行）")
 
@@ -1228,8 +1094,6 @@ def main():
 
     if args.cmd == "status":
         cmd_status(args.source)
-    elif args.cmd == "apply":
-        cmd_apply(args.source, args.date, args.label, args.changes)
     elif args.cmd == "export-excel":
         cmd_export_excel(args.source, output_path=args.output)
     elif args.cmd == "migrate":

@@ -201,8 +201,9 @@ def parse_event_date(event_time: str) -> Optional[date]:
     if m:
         return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
-    # 年月：2026-07 → 月初
-    m = re.search(r'(\d{4})-(\d{2})$', s)
+    # 年月或月份级窗口：2026-07 / 2026-07起 / 2026-04至2026-06 → 月初
+    # 原始文本仍保存在事件库；这里只提供窗口计算所需的近似起点。
+    m = re.match(r'^(\d{4})-(\d{1,2})(?:月)?(?:起|开始|以来|至.*)?$', s)
     if m:
         return date(int(m.group(1)), int(m.group(2)), 1)
 

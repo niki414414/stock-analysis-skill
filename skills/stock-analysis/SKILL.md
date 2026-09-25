@@ -5,7 +5,7 @@ description: |
   1. 加载用户画像 + 市场状态配置
   2. 校准检查（画像3月校准 + 月度主线更新提醒）
   3. 运行数据脚本 → 行情 + 技术指标 + 多日资金流向 + 板块宽度 + ETF资金 + 筹码 + high_baseline
-  4. 读取事件地图Excel → 赛道催化事件预处理（第二层基准）
+  4. 查询SQLite事件主库与催化生命周期档案 → 第二、三层基准
   5. WebSearch → 市场水位实时验证 + 催化事件实时验证 + 个股最新消息
   6. 六层检查框架（市场水位/事件催化/产业地位/趋势结构/买点位置/量能确认）
   7. 输出六层看板（含轨迹判断 + 左侧/右侧入场方案 + 盈亏比 + 退出规则 + 学习要点）
@@ -41,7 +41,7 @@ metadata:
 STEP 0  加载配置 → 校准检查
 STEP 1  解析股票代码
 STEP 2  运行数据脚本 → 行情 + 技术 + 资金 + 筹码 + 板块 + high_baseline
-STEP 3  读取事件地图Excel → 赛道催化预处理（第二层基准数据）
+STEP 3  查询SQLite事件主库与生命周期档案 → 第二、三层基准数据
 STEP 4  WebSearch → 市场水位 + 催化实时验证 + 个股新闻
 STEP 5  六层检查框架（Read analysis-prompt-template.md）
 STEP 6  输出看板（Read output-format-template.md）
@@ -85,19 +85,24 @@ Read("config/market_status.yaml")  → 加载全市场温度（current_temperatu
 
 ## STEP 2: 运行数据脚本
 
+个股结构使用复权行情，实际报价单独保留；Tushare按最后行情日复权并输出`price_basis`和
+`raw_close`。复权失败不可用未复权行情冒充同一技术口径，需提示缺数。数据脚本依赖仓库共享实现，
+优先直接从`$TZ_CODEX_HOME/repo/skills/stock-analysis/references/stock_data_fetcher.py`运行。
+
 1. 读取脚本：
 ```
 Read("references/stock_data_fetcher.py")
 ```
 
-2. 写入临时文件并执行：
+2. 直接执行仓库版本（优先使用工作区已有虚拟环境）：
 ```bash
-python3 /tmp/stock_data_fetcher.py --stocks "CODE1,CODE2" --days 120
+python3 "${TZ_CODEX_HOME:-$HOME/Desktop/tz-codex}/repo/skills/stock-analysis/references/stock_data_fetcher.py" --stocks "CODE1,CODE2" --days 120
 ```
 
 3. 依赖缺失时自动安装重试：
 ```bash
-pip3 install akshare efinance tushare --quiet && python3 /tmp/stock_data_fetcher.py --stocks "CODE1,CODE2" --days 120
+python3 -m pip install akshare efinance tushare --quiet
+python3 "${TZ_CODEX_HOME:-$HOME/Desktop/tz-codex}/repo/skills/stock-analysis/references/stock_data_fetcher.py" --stocks "CODE1,CODE2" --days 120
 ```
 
 ### 脚本输出字段（六层分析使用）
@@ -118,16 +123,17 @@ pip3 install akshare efinance tushare --quiet && python3 /tmp/stock_data_fetcher
 
 ---
 
-## STEP 3: 查询事件地图（csv周报）
+## STEP 3: 查询SQLite事件主库与生命周期档案
 
 调用脚本，为第二层催化分析和第三层产业地位判断做准备：
 
 ```bash
-python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py events --sector {一级赛道}
-python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py mapping --sector {一级赛道} --keyword {细分环节/产品关键词}
-python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py forward --sector {一级赛道}
-python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py corrections
-python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py window --sector {一级赛道}
+python3 "$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py" events --sector {一级赛道}
+python3 "$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py" mapping --sector {一级赛道} --keyword {细分环节/产品关键词}
+python3 "$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py" forward --sector {一级赛道}
+python3 "$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py" corrections
+python3 "$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py" window --sector {一级赛道}
+python3 "$TZ_CODEX_HOME/repo/skills/stock-analysis/scripts/event_map_query.py" db-company {股票代码/公司名}
 ```
 
 - `events`：该赛道未充分交易的催化事件
@@ -140,7 +146,18 @@ python3 ~/.claude/skills/stock-analysis/scripts/event_map_query.py window --sect
   - 🔵 → 需等季报验证，第二层不能单独作为通过理由，要等业绩兑现
   - ⚪ → 催化已经"不操作/窗口结束"，**即使`events`表还显示这条事件，第二层也不能拿它当通过理由**，必须说明"催化已过期，若要入场需要新的催化支撑"
 
-脚本自动取`~/Desktop/tz/科技产业事件/`下日期最新的`csvMMDD/`文件夹。
+`events/mapping/forward/corrections/status/window/db-company`均读取
+`$TZ_CODEX_HOME/技能数据/event_map_shadow.db`的SQLite主库。CSV/Excel只用于导出查看和恢复，
+不得作为六层分析的默认来源。
+
+找到匹配事件ID后，第二层下结论前必须读取其纵向档案：
+
+```bash
+python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/catalyst_dossier.py" show {source} {事件ID}
+```
+
+若档案没有观察记录，明确标注“连续证据待补”，只能依据经实时核验的新证据谨慎判断，不能把
+事件主库的一条静态记录写成“催化持续增强”。档案中的反证、失效和价格响应必须进入第二层结论。
 
 **注意**：事件地图是基准参照，不是唯一依据。必须配合STEP 4的实时搜索验证。
 

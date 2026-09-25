@@ -67,7 +67,7 @@ STEP 3   引导用户进入 /stock-analysis
 ## STEP 1: 运行扫描器
 
 ```bash
-python3 ~/.claude/skills/top-picks/references/catalyst_left_side_scanner.py \
+python3 "$TZ_CODEX_HOME/repo/skills/top-picks/references/catalyst_left_side_scanner.py" \
   --top 25 --min-event-score 5 --json > /tmp/left_side_result.json 2>/tmp/left_side_log.txt
 
 cat /tmp/left_side_log.txt   # 确认运行正常
@@ -81,6 +81,19 @@ pip3 install tushare pandas openpyxl --quiet
 ---
 
 ## STEP 2: 格式化输出
+
+价格筛选只使用目标交易日已更新且复权因子完整的个股日线；停牌、行情滞后或复权缺失的标的
+会从本次候选中排除，扫描警告须随结果一并检查。SQLite公司关系读取失败时应终止扫描，
+不能自动使用旧Excel；仅在明确指定`--company-source excel`时进行人工应急对照。
+
+扫描器的活跃事件与公司关系都来自SQLite主库。对准备列入“就绪优先关注”的事件，先执行：
+
+```bash
+python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/catalyst_dossier.py" show {source} {event_id}
+```
+
+把最近一次证据、反证/失效和价格响应写入候选理由。没有生命周期观察时标注“连续证据待补”，
+不得宣称催化已增强；该候选仍可供进一步六层核验，但不能仅凭静态事件记录升级操作优先级。
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -150,6 +163,6 @@ pip3 install tushare pandas openpyxl --quiet
 |------|------|
 | 无就绪候选 | 输出预热列表 + "当前无左侧窗口，建议持币" |
 | tushare拉取失败 | 检查token；跳过失败的个股，其余正常输出 |
-| SQLite公司关系读取失败 | 自动记录警告并回退Excel；`--company-source excel`可显式双读 |
-| 事件地图目录找不到 | 提示检查 ~/Desktop/tz/科技产业事件/csv0MMDD/ |
+| SQLite公司关系读取失败 | 自动记录警告并回退Excel；`--company-source excel`仅用于故障诊断并显式标注降级 |
+| SQLite事件主库找不到/校验失败 | 停止事件波段输出，提示检查`$TZ_CODEX_HOME/技能数据/event_map_shadow.db`或从备份恢复 |
 | 运行超时(>6分钟) | 提示网络慢，建议 --min-event-score 6 缩小范围 |

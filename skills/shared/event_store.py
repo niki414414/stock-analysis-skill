@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""SQLite shadow store for the event map.
+"""SQLite store for the event map.
 
-CSV/Excel remain the production source during the shadow phase.  This module
-builds a deterministic SQLite projection, records import anomalies, and offers
-read-only structured queries for analysis consumers.
+SQLite is the production write source. CSV/Excel inputs are retained only for
+bootstrap/recovery compatibility, and exports are read-only views.
+Legacy function and filename names containing ``shadow`` remain temporarily to
+avoid breaking consumers; ``metadata.build_mode`` defines the actual mode.
 """
 from __future__ import annotations
 
@@ -33,6 +34,13 @@ DEFAULT_AUDIT = DATA_ROOT / "event_db_audit.json"
 DEFAULT_MIGRATION_HISTORY = DATA_ROOT / "event_db_migration_history.json"
 BJ_CODE_PREFIXES = ("83", "87", "88", "92", "43")
 EVENT_ID_RE = re.compile(r"[A-Z][A-Z0-9-]*-\d{4}-\d{3}")
+# 公司池保留了早期主题锚点ID；事件库后来改用正式事件ID。
+# 这些兼容关系只用于迁移恢复，不代表新增事件。
+POOL_EVENT_ALIASES = {
+    ("tech", "AI-SOC-2026-001"): ("EDGE-AI-2026-001",),
+    ("nonfin", "PHARMA-CXO"): ("CXO-2026-001", "MONKEY-2026-001"),
+    ("nonfin", "PHARMA-INNOVATION"): ("INNODRUG-2026-001", "ESMO-2026-001"),
+}
 
 
 SCHEMA_SQL = """
@@ -125,6 +133,23 @@ CREATE TABLE company_event_links(
   UNIQUE(company_id,event_pk,role_2,role_3),
   FOREIGN KEY(company_id) REFERENCES companies(company_id),
   FOREIGN KEY(event_pk) REFERENCES events(event_pk)
+);
+CREATE TABLE company_pool_links(
+  pool_link_id INTEGER PRIMARY KEY,
+  source TEXT NOT NULL,
+  pool_sheet TEXT NOT NULL,
+  company_id INTEGER NOT NULL,
+  sector TEXT,
+  role_2 TEXT,
+  role_3 TEXT,
+  pool_event_ref TEXT,
+  relation_status TEXT NOT NULL CHECK(relation_status IN ('已绑定事件','待绑定事件')),
+  benefit_tier TEXT NOT NULL CHECK(benefit_tier IN ('明确映射','角色关联','主题观察')),
+  mapping_basis TEXT NOT NULL,
+  mapping_confidence TEXT,
+  source_ref TEXT,
+  UNIQUE(source,pool_sheet,company_id,sector,role_2,role_3,pool_event_ref),
+  FOREIGN KEY(company_id) REFERENCES companies(company_id)
 );
 CREATE TABLE materials(
   material_pk INTEGER PRIMARY KEY,
@@ -229,6 +254,8 @@ CREATE INDEX idx_events_id ON events(event_id);
 CREATE INDEX idx_links_company ON company_event_links(company_id);
 CREATE INDEX idx_links_event ON company_event_links(event_pk);
 CREATE INDEX idx_links_role2 ON company_event_links(role_2);
+CREATE INDEX idx_pool_links_company ON company_pool_links(company_id);
+CREATE INDEX idx_pool_links_sector ON company_pool_links(sector);
 CREATE INDEX idx_forward_sector ON forward_events(sector);
 CREATE INDEX idx_anomaly_type ON import_anomalies(issue_type);
 CREATE INDEX idx_source_rows_order ON source_rows(source,table_name,ordinal);
@@ -241,7 +268,8 @@ SOURCE_TABLE_IDS = {
         "sources": "来源ID", "weekly": None, "sectors_status": "sector_id",
     },
     "nonfin": {
-        "events": "事件ID", "mapping": None, "forward": None, "sources": "来源ID",
+        "events": "事件ID", "mapping": None, "forward": None,
+        "signals_early": "signal_id", "sources": "来源ID",
     },
 }
 
@@ -385,6 +413,12 @@ class EventStoreBuilder:
                 "relationships_with_verified_date": con.execute(
                     """SELECT count(*) FROM company_event_links
                        WHERE coalesce(trim(last_verified),'')<>''"""
+                ).fetchone()[0],
+                "company_pool_links": con.execute(
+                    "SELECT count(*) FROM company_pool_links"
+                ).fetchone()[0],
+                "unbound_company_pool_links": con.execute(
+                    "SELECT count(*) FROM company_pool_links WHERE relation_status='待绑定事件'"
                 ).fetchone()[0],
             }
         finally:
@@ -591,6 +625,24 @@ class EventStoreBuilder:
             )
             if not event_pk:
                 self._anomaly(con, "nonfin", "mapping", idx + 2, "orphan_event_ref", "", f"event_id={eid}", r)
+                continue
+            # 非科技mapping同样包含明确的公司名；旧迁移只写raw_mappings，
+            # 没有建立company_event_links，导致文章有归属但公司查询为空。
+            names = extract_known_companies(rep, self.code_map)
+            for name in names:
+                company_id = self.company_ids.get(name)
+                if not company_id:
+                    continue
+                con.execute(
+                    """INSERT OR IGNORE INTO company_event_links(
+                       company_id,event_pk,industry_1,role_2,role_3,relation_status,
+                       benefit_tier,mapping_basis,mapping_confidence,source_ref,last_verified)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (company_id, event_pk, r.get("一级赛道", ""), r.get("产业链位置", ""),
+                     r.get("受益方向", ""), "已登记", "角色关联",
+                     "非科技mapping代表公司明确列名", r.get("备注", ""),
+                     r.get("备注", "") or "非科技mapping", ""),
+                )
         forward, path = _load_csv(directory, "forward")
         self._record_file(path)
         for idx, r in forward.iterrows():
@@ -608,6 +660,23 @@ class EventStoreBuilder:
                 ("nonfin", rid, event[1] if event else eid, r.get("关键日期/窗口", ""), "", 0,
                  event[0] if event else "", r.get("可能结果", ""), "", "", r.get("验证逻辑", ""),
                  r.get("观察指标", ""), r.get("观察周期", ""), "", r.get("备注", "")),
+            )
+        signals, path = _load_csv(directory, "signals_early")
+        self._record_file(path)
+        for idx, r in signals.iterrows():
+            rid = r.get("signal_id", "").strip()
+            if not rid:
+                self._anomaly(con, "nonfin", "signals_early", idx + 2, "legacy_fragment", "",
+                              "空信号ID行保留为迁移异常，未进入正式early_signals", r)
+                continue
+            con.execute(
+                """INSERT OR IGNORE INTO early_signals(source,signal_id,signal_date,event_id,title,stage,content,industry_role,representative_text,validation_metrics,trade_status,confidence,source_type,source_ref,risk_notes,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ("nonfin", rid, r.get("signal_date", ""), r.get("event_id", ""), r.get("对应事件", ""),
+                 r.get("signal_stage", ""), r.get("早期信号内容", ""), r.get("产业链环节", ""),
+                 r.get("代表公司/公司类型", ""), r.get("later_validation", ""), r.get("market_trade_status", ""),
+                 r.get("confidence_level", ""), r.get("source_type", ""), r.get("source_ref", ""),
+                 r.get("风险/修正说明", ""), r.get("最新更新时间", "")),
             )
         sources, path = _load_csv(directory, "sources")
         self._record_file(path)
@@ -637,22 +706,43 @@ class EventStoreBuilder:
                 company_id = self.company_ids.get(r.get("公司名称", ""))
                 if not company_id:
                     continue
-                for eid in _event_ids(r.get("关联事件ID", "")):
-                    event_pk = self.event_pks.get((source, eid))
-                    if not event_pk:
-                        continue
+                raw_event_ref = str(r.get("关联事件ID", "") or "").strip()
+                refs = [part.strip() for part in re.split(r"[\s,，;；/|]+", raw_event_ref) if part.strip()]
+                if not refs:
+                    refs = [""]
+                for eid in refs:
+                    resolved_refs = [eid]
+                    if eid:
+                        resolved_refs.extend(POOL_EVENT_ALIASES.get((source, eid), ()))
+                    resolved_refs = list(dict.fromkeys(resolved_refs))
+                    resolved_pks = [self.event_pks.get((source, ref)) for ref in resolved_refs]
+                    resolved_pks = [pk for pk in resolved_pks if pk]
+                    event_pk = resolved_pks[0] if resolved_pks else None
                     source_parts = [
                         value for value in (r.get("来源批次", "").strip(), r.get("备注", "").strip())
                         if value
                     ]
                     con.execute(
-                        """INSERT OR IGNORE INTO company_event_links(company_id,event_pk,industry_1,role_2,role_3,relation_status,benefit_tier,mapping_basis,mapping_confidence,source_ref,last_verified)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                        (company_id, event_pk, r.get("一级赛道", ""), r.get("二级环节", ""),
-                         r.get("三级环节/定位", ""), "已登记", pool_benefit_tier(r),
-                         "公司池登记", r.get("置信度", ""), "；".join(source_parts) or "公司池",
-                         ""),
+                        """INSERT OR IGNORE INTO company_pool_links(
+                           source,pool_sheet,company_id,sector,role_2,role_3,pool_event_ref,
+                           relation_status,benefit_tier,mapping_basis,mapping_confidence,source_ref)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (source, sheet, company_id, r.get("一级赛道", ""),
+                         r.get("二级环节", ""), r.get("三级环节/定位", ""), eid,
+                         "已绑定事件" if event_pk else "待绑定事件", pool_benefit_tier(r),
+                         "公司池登记", r.get("置信度", ""), "；".join(source_parts) or "公司池"),
                     )
+                    if not event_pk:
+                        continue
+                    for linked_event_pk in resolved_pks:
+                        con.execute(
+                            """INSERT OR IGNORE INTO company_event_links(company_id,event_pk,industry_1,role_2,role_3,relation_status,benefit_tier,mapping_basis,mapping_confidence,source_ref,last_verified)
+                               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                            (company_id, linked_event_pk, r.get("一级赛道", ""), r.get("二级环节", ""),
+                             r.get("三级环节/定位", ""), "已登记", pool_benefit_tier(r),
+                             "公司池登记/历史ID兼容", r.get("置信度", ""),
+                             "；".join(source_parts) or "公司池", ""),
+                        )
 
     def _record_file(self, path: Optional[Path]):
         if path:
@@ -660,7 +750,7 @@ class EventStoreBuilder:
 
     def _write_metadata(self, con):
         values = {
-            "schema_version": "2",
+            "schema_version": "3",
             "build_mode": "shadow",
             "built_at": datetime.now(timezone.utc).isoformat(),
             "workspace_root": str(WORKSPACE_ROOT),
@@ -677,7 +767,7 @@ class EventStore:
     def __init__(self, db_path: Union[Path, str] = DEFAULT_DB):
         self.db_path = Path(db_path)
         if not self.db_path.exists():
-            raise FileNotFoundError(f"影子数据库不存在: {self.db_path}")
+            raise FileNotFoundError(f"事件SQLite数据库不存在: {self.db_path}")
 
     def _query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         con = sqlite3.connect(self.db_path)
@@ -687,9 +777,24 @@ class EventStore:
         finally:
             con.close()
 
+    def source_table(self, source: str, table_name: str) -> list[dict[str, Any]]:
+        """Return the lossless source rows that back the normalized tables.
+
+        Analysis consumers use this when they still need the historical Chinese
+        column contract.  The rows come from the SQLite primary store, never from
+        a CSV export, and retain their original deterministic order.
+        """
+        rows = self._query(
+            """SELECT row_json FROM source_rows
+               WHERE source=? AND table_name=?
+               ORDER BY ordinal,row_key""",
+            (source, table_name),
+        )
+        return [json.loads(row["row_json"]) for row in rows]
+
     def company(self, keyword: str) -> list[dict[str, Any]]:
         like = f"%{keyword}%"
-        return self._query(
+        rows = self._query(
             """SELECT c.stock_code,c.company_name,e.source,e.sector,e.event_id,e.event_name,e.status,
                       e.importance,e.trade_status,l.industry_1,l.role_2,l.role_3,l.relation_status,
                       l.benefit_tier,l.mapping_basis,l.mapping_confidence,l.source_ref,
@@ -699,6 +804,20 @@ class EventStore:
                ORDER BY e.importance DESC,e.last_verified DESC,e.event_id""",
             (like, like),
         )
+        rows.extend(self._query(
+            """SELECT c.stock_code,c.company_name,NULL AS source,p.sector,
+                      p.pool_event_ref AS event_id,NULL AS event_name,NULL AS status,
+                      NULL AS importance,NULL AS trade_status,NULL AS industry_1,
+                      p.role_2,p.role_3,p.relation_status,p.benefit_tier,p.mapping_basis,
+                      p.mapping_confidence,p.source_ref,NULL AS validation_metrics,
+                      NULL AS risk_notes,NULL AS last_verified
+               FROM companies c JOIN company_pool_links p USING(company_id)
+               WHERE (c.company_name LIKE ? OR c.stock_code LIKE ?)
+                 AND p.relation_status='待绑定事件'
+               ORDER BY c.company_name,p.sector,p.pool_event_ref""",
+            (like, like),
+        ))
+        return rows
 
     def sector(self, keyword: str) -> list[dict[str, Any]]:
         like = f"%{keyword}%"
@@ -775,7 +894,22 @@ class EventStore:
 def build_shadow_database(db_path: Union[Path, str] = DEFAULT_DB,
                           audit_path: Union[Path, str] = DEFAULT_AUDIT,
                           tech_dir: Optional[Union[Path, str]] = None,
-                          nonfin_dir: Optional[Union[Path, str]] = None):
+                          nonfin_dir: Optional[Union[Path, str]] = None,
+                          allow_primary_overwrite: bool = False):
+    target = Path(db_path)
+    if target.exists() and not allow_primary_overwrite:
+        try:
+            con = sqlite3.connect(target)
+            mode = con.execute(
+                "SELECT value FROM metadata WHERE key='build_mode'"
+            ).fetchone()
+            con.close()
+        except sqlite3.Error:
+            mode = None
+        if mode and mode[0] == "sqlite_primary":
+            raise RuntimeError(
+                "拒绝用CSV重建sqlite_primary主库；请使用apply_package_atomic或显式恢复流程"
+            )
     audit = EventStoreBuilder(db_path, tech_dir=tech_dir, nonfin_dir=nonfin_dir).build()
     audit_file = Path(audit_path)
     audit_file.parent.mkdir(parents=True, exist_ok=True)
