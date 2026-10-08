@@ -1,5 +1,7 @@
 # Memory Index
 
+- [缠论结构增量验证](project-chan-structure-validation-20261005.md) — 11资产历史验证完成，固定波段代理未通过；保留现有V2，不增加日常取数或交易门槛
+
 - [个人投资辅助闭环目标与验收](../INVESTMENT_WORKFLOW.md) — 2026-09-22：交互简单、输出深入；箱体—板块—事件—个股—买卖条件—结果复核；六项修复及整体迭代主线，后续修改先读
 
 - [事件库细分主题召回修复（2026-09-09完成）](project-event-context-subtopic-filter-20260909.md) — AI安全真实案例暴露expanded_fields过度召回；已完成直接证据、上级背景、公司文字点名分层，并通过AI安全/MLCC/乳制品三案例回归

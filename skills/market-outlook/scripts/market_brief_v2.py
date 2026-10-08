@@ -573,7 +573,7 @@ def _market_paragraph(market: dict, context: dict) -> str:
         comparison_text = (
             f"，较5日均量{comparison:+.1f}%" if comparison is not None else "，5日均量对比缺失"
         )
-        turn_text = f" 两市成交额约{turnover['latest_yi']:.0f}亿元{comparison_text}。"
+        turn_text = f" 全市场成交额约{turnover['latest_yi']:.0f}亿元{comparison_text}。"
     upper_text = (
         f"向上先看{_zone_text(resistance1)}，穿越后看{_zone_text(resistance2)}"
         if resistance1 else "上方暂无可靠历史压力区，先按突破后的回踩确认处理"

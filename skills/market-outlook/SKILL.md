@@ -78,7 +78,18 @@ python3 "$TZ_CODEX_HOME/repo/skills/market-outlook/scripts/catalyst_dossier.py" 
 
 ## 工作流
 
+### 综合研究入口（2026-09-30）
+
+用户说“综合/综合研究/跑今天综合”时，先读取仓库`INTEGRATED_RESEARCH.md`并运行
+`scripts/integrated_research.py start`。自动列出到期任务；先将复核结果写回原账本，或逐项
+记录缺数原因与下次补证动作，才进入市场/板块/事件/个股的新分析。所有研究脚本经该入口
+的`call`记录真实调用，读取结果后用`assess`记录对哪项判断有贡献；联网搜索用`external`
+保存证据引用。无变化不重复全量深研。该综合入口由AI编排，不改变下文V2/全景专项边界，
+也不代表已经建立定时任务或自动交易。
+
 ### STEP 0：市场可执行简报（默认）
+
+缠论结构的2026-10-05增量验证未通过接入门槛，见[验证结论](references/chan-structure-validation.md)。现有简化底形态不是完整缠论；实验波段结构不进入V2突破确认、板块排名或买卖规则。讨论进一步引入时先读该结论，避免重复同一试验。
 
 默认只运行输出驱动的新入口：
 
