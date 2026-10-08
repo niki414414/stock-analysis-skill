@@ -36,21 +36,23 @@ from pathlib import Path
 
 import pandas as pd
 
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root, event_db_path
+from skills.shared.datasource import get_pro as _shared_get_pro
+
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s", stream=sys.stderr)
 log = logging.getLogger(__name__)
 
 # ── 路径常量 ──────────────────────────────────────────────────────────────────
-WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-))
-REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+WORKSPACE_ROOT = str(workspace_root())
+REPO_ROOT = str(repo_root())
 from skills.shared.price_data import adjust_to_latest
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
 COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
 CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
-EVENT_DB = os.path.join(DATA_ROOT, "event_map_shadow.db")
+EVENT_DB = str(event_db_path())
 
 # ── 申万行业轮动雷达 ──────────────────────────────────────────────────────────
 # 使用 SW2021 标准代码（via pro.index_classify(level='L1', src='SW2021')）
@@ -169,16 +171,8 @@ def rotation_check(pro) -> None:
 
 # ── Tushare ───────────────────────────────────────────────────────────────────
 def _get_pro():
-    token = os.environ.get("TUSHARE_TOKEN", "")
-    env_path = os.path.join(REPO_ROOT, ".env")
-    if os.path.exists(env_path):
-        for line in open(env_path):
-            if "TUSHARE_TOKEN" in line:
-                token = line.split("=", 1)[-1].strip()
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN 未配置；请写入 repo/.env 或环境变量")
-    import tushare as ts
-    return ts.pro_api(token)
+    return _shared_get_pro()
+
 
 # ── Step 1: 催化过滤（唯一权威来源=event_map_query.py window，见下方load_window_scores）─────
 # 不再自己解析events.csv的"重要程度/当前状态"字段打分——那套静态标签不衰减，

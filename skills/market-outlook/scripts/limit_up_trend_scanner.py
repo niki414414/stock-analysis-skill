@@ -23,6 +23,13 @@ from pathlib import Path
 
 import pandas as pd
 
+import sys
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root, config_file
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro, get_token as _shared_token
+
 
 MAIN_BOARD_PREFIXES = ("000", "001", "002", "003", "600", "601", "603", "605")
 OUTPUT_COLUMNS = [
@@ -48,19 +55,9 @@ OUTPUT_COLUMNS = [
 ]
 
 
-def load_workspace_env() -> Path:
-    root = Path(os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")).expanduser()
-    env_path = root / "repo" / ".env"
-    if env_path.exists():
-        for raw in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key, value = key.strip(), value.strip().strip('"').strip("'")
-            if key == "TUSHARE_TOKEN" and value:
-                os.environ[key] = value
-    return root
+def load_workspace_env():
+    _shared_load_env(config_file())
+    return workspace_root()
 
 
 def is_main_board_code(ts_code: str) -> bool:
@@ -576,12 +573,11 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
     root = load_workspace_env()
-    import tushare as ts
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token:
         raise RuntimeError("TUSHARE_TOKEN未设置")
     as_of = args.as_of or pd.Timestamp.now(tz="Asia/Shanghai").strftime("%Y%m%d")
-    pro = ts.pro_api(token)
+    pro = _shared_get_pro()
     bars, basics, actual_as_of = fetch_data(pro, as_of, args.lookback_days)
     scanned = scan_frames(bars, basics, actual_as_of)
     excluded_stale = scanned.attrs.get("excluded_stale", [])

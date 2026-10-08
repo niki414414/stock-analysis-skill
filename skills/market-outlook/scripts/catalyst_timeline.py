@@ -28,17 +28,18 @@ from typing import Iterable, Optional
 
 import pandas as pd
 
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root, event_db_path
 
-WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-)))
+
+WORKSPACE_ROOT = workspace_root()
 DATA_ROOT = WORKSPACE_ROOT / "技能数据"
-REPO_ROOT = WORKSPACE_ROOT / "repo"
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+REPO_ROOT = repo_root()
 from skills.shared.event_store import EventStore  # noqa: E402
 
-EVENT_DB = DATA_ROOT / "event_map_shadow.db"
+EVENT_DB = event_db_path()
 
 
 @dataclass

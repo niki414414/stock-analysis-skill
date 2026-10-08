@@ -11,10 +11,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import sys
+_CODE_ROOT = Path(__file__).resolve().parents[1]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root
 
-WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-)))
+
+WORKSPACE_ROOT = workspace_root()
 DEFAULT_JOURNAL = WORKSPACE_ROOT / "技能数据" / "decision_journal.jsonl"
 
 

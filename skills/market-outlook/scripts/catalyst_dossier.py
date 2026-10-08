@@ -12,10 +12,15 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root, event_db_path
+from skills.shared.datasource import get_pro as _shared_get_pro
+
 
 ROOT = Path(__file__).resolve().parents[3]
-WORKSPACE = Path(os.environ.get("TZ_CODEX_HOME", ROOT.parent))
-sys.path.insert(0, str(ROOT))
+WORKSPACE = workspace_root()
 
 from skills.shared.catalyst_memory import (  # noqa: E402
     basket_medians, calculate_price_response, connect, observations,
@@ -23,7 +28,7 @@ from skills.shared.catalyst_memory import (  # noqa: E402
     response_summary, store_price_response,
 )
 
-EVENT_DB = WORKSPACE / "技能数据" / "event_map_shadow.db"
+EVENT_DB = event_db_path()
 MEMORY_DB = WORKSPACE / "技能数据" / "catalyst_research_memory.db"
 EVENT_ID_RE = re.compile(r"[A-Z][A-Z0-9-]*-\d{4}-\d{3}")
 
@@ -557,16 +562,7 @@ def render(d: dict[str, Any]) -> str:
 
 
 def _load_pro():
-    env = WORKSPACE / "repo" / ".env"
-    if env.exists():
-        for line in env.read_text(encoding="utf-8").splitlines():
-            if line.startswith("TUSHARE_TOKEN=") and "TUSHARE_TOKEN" not in os.environ:
-                os.environ["TUSHARE_TOKEN"] = line.partition("=")[2].strip()
-    import tushare as ts
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN 未配置")
-    return ts.pro_api(token)
+    return _shared_get_pro()
 
 
 def _market_code(code: str) -> str:

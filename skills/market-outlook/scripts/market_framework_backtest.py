@@ -20,11 +20,14 @@ from pathlib import Path
 import pandas as pd
 
 
-WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-)))
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root
+
+WORKSPACE_ROOT = workspace_root()
 FETCHER_PATH = (
-    WORKSPACE_ROOT / "repo/skills/stock-analysis/scripts/market_state_fetcher.py"
+    repo_root() / "skills/stock-analysis/scripts/market_state_fetcher.py"
 )
 INDEX_CODES = {
     "上证指数": "000001.SH", "创业板指": "399006.SZ", "科创50": "000688.SH",

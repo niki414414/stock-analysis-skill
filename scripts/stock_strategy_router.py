@@ -22,9 +22,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+_CODE_ROOT = Path(__file__).resolve().parents[1]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_ROOT = Path(os.environ.get("TZ_CODEX_HOME", REPO_ROOT.parent)).expanduser()
+WORKSPACE_ROOT = workspace_root()
 SHORT_SCRIPT = REPO_ROOT / "skills/market-outlook/scripts/limit_up_trend_scanner.py"
 SWING_SCRIPT = REPO_ROOT / "skills/top-picks/references/catalyst_left_side_scanner.py"
 CORE_SCRIPT = REPO_ROOT / "skills/quality-compounder/references/quality_compounder_screener.py"

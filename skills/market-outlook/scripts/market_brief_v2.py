@@ -18,14 +18,18 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root, config_file
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[2]
-WORKSPACE_ROOT = REPO_ROOT.parent
+WORKSPACE_ROOT = workspace_root()
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from market_structure_v2 import build_market_structure_v2  # noqa: E402
 from skills.shared.price_data import adjust_to_latest  # noqa: E402
@@ -733,26 +737,12 @@ def render_article(result: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _load_env() -> None:
-    env_path = REPO_ROOT / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = (part.strip() for part in line.split("=", 1))
-        if key == "TUSHARE_TOKEN" and value:
-            os.environ[key] = value
+def _load_env():
+    _shared_load_env(config_file())
 
 
 def _get_pro():
-    _load_env()
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN未配置；也可用--input读取离线数据包")
-    import tushare as ts
-    return ts.pro_api(token)
+    return _shared_get_pro()
 
 
 def _stock_code(value: str) -> str:

@@ -22,6 +22,13 @@ import warnings
 import math
 from datetime import datetime, timedelta
 
+from pathlib import Path
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import config_file
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro
+
 warnings.filterwarnings("ignore")
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,19 +43,7 @@ def _log(msg):
 
 
 def _load_env_file():
-    home = os.environ.get("TZ_CODEX_HOME", os.path.expanduser("~/Desktop/tz-codex"))
-    env_path = os.path.join(home, "repo", ".env")
-    if not os.path.exists(env_path):
-        return
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key, val = key.strip(), val.strip()
-            if key and val and (key == "TUSHARE_TOKEN" or key not in os.environ):
-                os.environ[key] = val
+    _shared_load_env(config_file())
 
 
 _load_env_file()
@@ -71,12 +66,7 @@ def load_config():
 
 
 def get_pro():
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        _log("TUSHARE_TOKEN 未配置，检查 $TZ_CODEX_HOME/repo/.env")
-        sys.exit(1)
-    import tushare as ts
-    return ts.pro_api(token)
+    return _shared_get_pro()
 
 
 def latest_trade_date(pro):

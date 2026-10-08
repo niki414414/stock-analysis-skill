@@ -28,13 +28,15 @@ from datetime import datetime
 
 import pandas as pd
 
+from pathlib import Path
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root
+
 # ── 路径常量（与 event_map_query.py 保持一致）─────────────────────────
-WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-))
-REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+WORKSPACE_ROOT = str(workspace_root())
+REPO_ROOT = str(repo_root())
 from skills.shared.event_store import DEFAULT_DB, EventStore
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
 TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")

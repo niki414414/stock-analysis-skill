@@ -267,14 +267,11 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
     root = SCANNER.load_workspace_env()
-    import tushare as ts
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN未设置")
+    from skills.shared.datasource import get_pro
     out_dir = args.output_dir or root / "技能数据" / "运行记录" / "策略回测"
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = root / "技能数据" / "market_history_cache"
-    pro = ts.pro_api(token)
+    pro = get_pro()
     bars = fetch_history(pro, args.start, args.end, cache_dir)
     basics = pro.stock_basic(exchange="", list_status="L", fields="ts_code,symbol,name,industry,market,list_date")
     rows = run_backtest(

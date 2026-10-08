@@ -30,20 +30,19 @@ from pathlib import Path
 
 import pandas as pd
 
-WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-))
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root, event_db_path
+
+WORKSPACE_ROOT = str(workspace_root())
 DATA_ROOT = os.path.join(WORKSPACE_ROOT, "技能数据")
-EVENT_DB = Path(os.environ.get(
-    "EVENT_MAP_DB", os.path.join(DATA_ROOT, "event_map_shadow.db")
-)).expanduser()
+EVENT_DB = event_db_path()
 TECH_DIR = os.path.join(DATA_ROOT, "科技产业事件")
 NONFIN_DIR = os.path.join(DATA_ROOT, "非科技产业事件地图")
 COMPANY_POOL = os.path.join(DATA_ROOT, "公司.xlsx")
 CODE_MAP_CSV = os.path.join(DATA_ROOT, "company_code_map.csv")
 REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 
 def _sqlite_store():

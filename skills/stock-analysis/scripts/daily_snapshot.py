@@ -20,9 +20,16 @@ import os
 import sys
 from datetime import datetime, timedelta
 
+from pathlib import Path
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root, config_file
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "references"))
 
-TZ_CODEX_HOME = os.environ.get("TZ_CODEX_HOME", os.path.expanduser("~/Desktop/tz-codex"))
+TZ_CODEX_HOME = str(workspace_root())
 OUT_DIR = os.path.join(TZ_CODEX_HOME, "技能数据", "market_daily_snapshot")
 WATCHLIST_PATH = os.path.join(OUT_DIR, "watchlist.csv")
 
@@ -40,27 +47,11 @@ SECTOR_ETF_MAP = {
 
 
 def _load_env_file():
-    env_path = os.path.join(TZ_CODEX_HOME, "repo", ".env")
-    if not os.path.exists(env_path):
-        return
-    with open(env_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key, value = key.strip(), value.strip()
-            if key and value and (key == "TUSHARE_TOKEN" or key not in os.environ):
-                os.environ[key] = value
+    _shared_load_env(config_file())
 
 
 def _get_pro():
-    _load_env_file()
-    import tushare as ts
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN 未设置；请检查 $TZ_CODEX_HOME/repo/.env")
-    return ts.pro_api(token)
+    return _shared_get_pro()
 
 
 def _resolve_trade_date(pro, date_arg):

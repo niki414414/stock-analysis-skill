@@ -8,10 +8,10 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from skills.shared.paths import workspace_root
 
-WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-)))
+
+WORKSPACE_ROOT = workspace_root()
 DEFAULT_LEDGER = WORKSPACE_ROOT / "技能数据" / "catalyst_activation_ledger.json"
 
 

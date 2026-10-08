@@ -14,26 +14,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-)))
-REPO_ROOT = WORKSPACE_ROOT / "repo"
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root
+from skills.shared.datasource import get_pro
+
+WORKSPACE_ROOT = workspace_root()
+REPO_ROOT = repo_root()
 sys.path.insert(0, str(REPO_ROOT / "skills/market-outlook/scripts"))
 from market_structure_v2 import build_market_structure_v2  # noqa: E402
 from market_review_renderer_v2 import build_structure_decision_card  # noqa: E402
-
-
-def _token() -> str:
-    token = os.environ.get("TUSHARE_TOKEN")
-    env_path = REPO_ROOT / ".env"
-    if not token and env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("TUSHARE_TOKEN="):
-                token = line.split("=", 1)[1].strip()
-                break
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN is not configured")
-    return token
 
 
 def compact(snapshot: dict) -> dict:
@@ -111,8 +102,7 @@ def main() -> None:
     codes = [item.strip() for item in args.ts_code.split(",") if item.strip()]
     if len(names) != len(codes):
         raise ValueError("--ts-code 与 --index-name 的数量必须一致")
-    import tushare as ts
-    pro = ts.pro_api(_token())
+    pro = get_pro()
     frames = {
         name: pro.index_daily(
             ts_code=code,

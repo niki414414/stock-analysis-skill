@@ -28,14 +28,16 @@ from pathlib import Path
 
 import requests
 
+_CODE_ROOT = Path(__file__).resolve().parents[2]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import workspace_root, config_file
+from skills.shared.datasource import load_env as _shared_load_env, get_pro, get_token
+
 # ── 路径 ───────────────────────────────────────────────────────────────────────
 SKILL_DIR = Path(__file__).parent
-WORKSPACE_ROOT = Path(
-    os.path.abspath(os.path.expanduser(
-        os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-    ))
-)
-ENV_FILE  = WORKSPACE_ROOT / "repo" / ".env"
+WORKSPACE_ROOT = workspace_root()
+ENV_FILE  = config_file()
 LOG_PATH  = SKILL_DIR / "notify.log"
 
 # ── 板块ETF映射（用ETF涨跌代理板块表现，tushare fund_daily 接口，稳定可靠）────────
@@ -132,13 +134,7 @@ WATCHLIST: dict[str, tuple[str, str]] = {
 
 # ── 环境变量 ───────────────────────────────────────────────────────────────────
 def load_env():
-    if not ENV_FILE.exists():
-        return
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip())
+    _shared_load_env(ENV_FILE)
 
 
 load_env()
@@ -199,10 +195,9 @@ def fetch_sector_data(rdate: str) -> list[dict]:
     [{"display": str, "etf_code": str, "etf_name": str, "pct": float,
       "vol_ratio": float, "error": str|None}]
     """
-    import tushare as ts
     import pandas as pd
 
-    pro = ts.pro_api(os.environ.get("TUSHARE_TOKEN", ""))
+    pro = get_pro()
     # 计算量比需要近5日数据
     prev5_start = (
         datetime.strptime(rdate, "%Y%m%d") - timedelta(days=10)
@@ -436,16 +431,15 @@ def fetch_watchlist_scan(rdate: str) -> list[dict]:
     用 Tushare pro.daily() 批量拉取自选池数据，计算轨迹。
     rdate: YYYYMMDD 格式
     """
-    import tushare as ts
     import pandas as pd
     import time
 
-    token = os.environ.get("TUSHARE_TOKEN", "")
+    token = get_token()
     if not token:
         print("[WARN] 无 TUSHARE_TOKEN，跳过日扫")
         return []
 
-    pro = ts.pro_api(token)
+    pro = get_pro()
     start = (datetime.strptime(rdate, "%Y%m%d") - timedelta(days=150)).strftime("%Y%m%d")
     results = []
 

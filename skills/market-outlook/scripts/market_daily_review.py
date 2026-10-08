@@ -17,16 +17,20 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro, get_token as _shared_token
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 from market_review_renderer_v2 import build_structure_decision_card  # noqa: E402
 
 
-WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-)))
-REPO_ROOT = WORKSPACE_ROOT / "repo"
+WORKSPACE_ROOT = workspace_root()
+REPO_ROOT = repo_root()
 STATE_SCRIPT = REPO_ROOT / "skills/stock-analysis/scripts/market_state_fetcher.py"
 RADAR_SCRIPT = REPO_ROOT / "skills/market-outlook/scripts/market_opportunity_radar.py"
 STRATEGY_ROUTER = REPO_ROOT / "scripts/stock_strategy_router.py"
@@ -158,20 +162,11 @@ def load_holdings(path: str | Path | None) -> list[dict]:
 
 def fetch_holding_market_data(holdings: list[dict], trade_date: str) -> dict[str, dict]:
     """Fetch only the light data needed by the review triage table."""
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        env_path = REPO_ROOT / ".env"
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                if line.strip() and "=" in line and not line.lstrip().startswith("#"):
-                    key, value = line.split("=", 1)
-                    if key.strip() == "TUSHARE_TOKEN":
-                        token = value.strip()
-                        break
+    _shared_load_env()
+    token = _shared_token()
     if not token or not trade_date:
         return {}
-    import tushare as ts
-    pro = ts.pro_api(token)
+    pro = _shared_get_pro()
     start = (datetime.strptime(trade_date, "%Y%m%d").date()).strftime("%Y%m%d")
     # Calendar days, not trading days: 130 days safely covers MA60.
     from datetime import timedelta

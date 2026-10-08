@@ -17,6 +17,13 @@ from pathlib import Path
 
 import pandas as pd
 
+import sys
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import config_file
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro, get_token as _shared_token
+
 
 POSITIVE_TYPES = {"预增", "略增", "扭亏", "续盈"}
 ONE_OFF_TERMS = (
@@ -30,24 +37,9 @@ OPERATING_TERMS = (
 )
 
 
-def load_workspace_env() -> Path:
-    root = Path(os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")).expanduser()
-    env_path = root / "repo" / ".env"
-    if not env_path.exists():
-        raise RuntimeError(f"未找到项目配置：{env_path}")
-    for raw in env_path.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key, value = key.strip(), value.strip().strip('"').strip("'")
-        if not key or not value:
-            continue
-        if key == "TUSHARE_TOKEN":
-            os.environ[key] = value
-        else:
-            os.environ.setdefault(key, value)
-    return env_path
+def load_workspace_env():
+    _shared_load_env(config_file())
+    return config_file()
 
 
 def finite(value):
@@ -438,11 +430,10 @@ def main():
     args = parser.parse_args()
 
     load_workspace_env()
-    import tushare as ts
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token:
         raise RuntimeError("TUSHARE_TOKEN 未配置")
-    pro = ts.pro_api(token)
+    pro = _shared_get_pro()
 
     forecasts = fetch_forecasts(pro, args.scan_start, args.as_of)
     selected = prefilter_forecasts(

@@ -28,34 +28,18 @@ import argparse
 import warnings
 from datetime import datetime, timedelta
 
+from pathlib import Path
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import config_file
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro, get_token as _shared_token
+
 warnings.filterwarnings("ignore")
 
 
 def _load_env_file():
-    """Load workspace configuration, preferring its Tushare token.
-
-    Desktop processes can retain an obsolete shell token after ``repo/.env`` is
-    refreshed.  Tushare is a project-scoped primary data source here, so the
-    checked workspace location is authoritative for that one credential.
-    Other environment variables keep the conventional process-first behavior.
-    """
-    workspace_root = os.path.abspath(os.path.expanduser(
-        os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-    ))
-    env_path = os.path.join(workspace_root, "repo", ".env")
-    if not os.path.exists(env_path):
-        return
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key, val = key.strip(), val.strip()
-            if key == "TUSHARE_TOKEN" and val:
-                os.environ[key] = val
-            elif key and val and key not in os.environ:
-                os.environ[key] = val
+    _shared_load_env(config_file())
 
 
 _load_env_file()
@@ -162,21 +146,16 @@ def _df_to_ohlcv(df, days):
 
 def _fetch_tushare_a(code: str, days: int):
     """Fetch A-share via Tushare Pro. Returns (ohlcv, source) or raises."""
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token:
         raise EnvironmentError("TUSHARE_TOKEN not set")
-    import tushare as ts
-    pro = ts.pro_api(token)
+    pro = _shared_get_pro()
     ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
     df = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
     if df is None or df.empty:
         raise ValueError(f"Tushare returned no data for {code}")
-    repo_root = os.path.join(os.path.expanduser(os.environ.get(
-        "TZ_CODEX_HOME", "~/Desktop/tz-codex")), "repo")
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
     from skills.shared.price_data import adjust_to_latest
     factors = pro.adj_factor(ts_code=ts_code, start_date=start_date, end_date=end_date)
     df = adjust_to_latest(df, factors)
@@ -430,7 +409,7 @@ def fetch_cn_a(code: str, days: int) -> dict:
     errors = []
 
     # Priority 0: Tushare Pro (if token configured)
-    if os.environ.get("TUSHARE_TOKEN") and _check_source("tushare"):
+    if _shared_token() and _check_source("tushare"):
         try:
             ohlcv, source = _fetch_tushare_a(code, days)
         except Exception as e:
@@ -683,12 +662,11 @@ def fetch_market_breadth(as_of_date: str = None) -> dict:
 
     as_of_date: YYYYMMDD，指定回测某个历史交易日；None=取最近一个已收盘交易日（实盘用）
     """
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token:
         return {"source": "unavailable", "regime_label": "unknown"}
     try:
-        import tushare as ts
-        pro = ts.pro_api(token)
+        pro = _shared_get_pro()
 
         if as_of_date:
             trade_date = as_of_date
@@ -766,12 +744,11 @@ def _fetch_tushare_moneyflow_df(code: str, days: int = 30):
     Shared helper: fetch raw Tushare moneyflow DataFrame (5000积分+).
     Amounts in 万元. Returns sorted DataFrame or None on failure.
     """
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token or not _check_source("tushare"):
         return None
     try:
-        import tushare as ts
-        pro = ts.pro_api(token)
+        pro = _shared_get_pro()
         ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         start = (datetime.now() - timedelta(days=days + 10)).strftime("%Y%m%d")
         end = datetime.now().strftime("%Y%m%d")
@@ -1035,12 +1012,11 @@ def fetch_tushare_chip_dist(code: str) -> dict:
     Returns winner_rate (获利盘%), weight_avg (加权成本), cost percentiles.
     Much more accurate than VWAP approximation in calc_chip_concentration.
     """
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token or not _check_source("tushare"):
         return {"source": "no_tushare_token"}
     try:
-        import tushare as ts
-        pro = ts.pro_api(token)
+        pro = _shared_get_pro()
         ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         start = (datetime.now() - timedelta(days=16)).strftime("%Y%m%d")
         end = datetime.now().strftime("%Y%m%d")
@@ -1108,11 +1084,10 @@ def fetch_tushare_chip_dist(code: str) -> dict:
 def fetch_stock_sector(code: str) -> str:
     """Get primary industry/sector classification for an A-share stock."""
     # Try tushare first (most accurate for CN stocks)
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if token and _check_source("tushare"):
         try:
-            import tushare as ts
-            pro = ts.pro_api(token)
+            pro = _shared_get_pro()
             ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
             df = pro.stock_basic(ts_code=ts_code, fields="ts_code,name,industry")
             if df is not None and not df.empty:
@@ -1238,12 +1213,11 @@ def _fetch_etf_share_change(etf_codes: list) -> dict:
     （折溢价率是套利驱动，可能不代表方向性资金；份额变化是真实申赎的直接证据）。
     数据源：Tushare fund_share。不参与打分，仅展示。
     """
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token or not _check_source("tushare"):
         return {}
     try:
-        import tushare as ts
-        pro = ts.pro_api(token)
+        pro = _shared_get_pro()
         start = (datetime.now() - timedelta(days=10)).strftime("%Y%m%d")
         end = datetime.now().strftime("%Y%m%d")
         share_chg_pct_list = []
@@ -1428,13 +1402,12 @@ def fetch_tushare_fundamentals(code: str) -> dict:
     Returns PE percentile (估值三维判断), ROE, growth (质量因子), PEG.
     Returns {"source": "no_tushare_token"} silently if token not set.
     """
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token or not _check_source("tushare"):
         return {"source": "no_tushare_token"}
 
     try:
-        import tushare as ts
-        pro = ts.pro_api(token)
+        pro = _shared_get_pro()
         ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         result = {"source": "tushare", "ts_code": ts_code}
 
@@ -1531,12 +1504,11 @@ def fetch_pledge_ratio(code: str) -> dict:
     质押率20-40% → 中等
     质押率<20% → 正常
     """
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token or not _check_source("tushare"):
         return {"source": "no_tushare_token"}
     try:
-        import tushare as ts
-        pro = ts.pro_api(token)
+        pro = _shared_get_pro()
         ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         df = pro.pledge_stat(ts_code=ts_code)
         if df is None or df.empty:
@@ -1580,13 +1552,12 @@ def fetch_financial_penetration(code: str) -> dict:
     穿透财报三项领先指标，判断订单积累/去库存/产能扩张真实性。
     仅A股，仅Tushare，无token时静默返回。
     """
-    token = os.environ.get("TUSHARE_TOKEN")
+    token = _shared_token()
     if not token or not _check_source("tushare"):
         return {"source": "no_tushare_token"}
 
     try:
-        import tushare as ts
-        pro = ts.pro_api(token)
+        pro = _shared_get_pro()
         ts_code = f"{code}.SH" if code.startswith(("600", "601", "603", "605", "688")) else f"{code}.SZ"
         end_date = datetime.now().strftime("%Y%m%d")
         start_2y = (datetime.now() - timedelta(days=800)).strftime("%Y%m%d")
@@ -2637,7 +2608,7 @@ def main():
     sources_status = {}
     for lib in ["tushare", "efinance", "akshare", "yfinance"]:
         sources_status[lib] = "available" if _check_source(lib) else "not installed"
-    sources_status["tushare_token"] = "configured" if os.environ.get("TUSHARE_TOKEN") else "not set (add to repo/.env)"
+    sources_status["tushare_token"] = "configured" if _shared_token() else "not set (add to repo/.env)"
     sources_status["tavily_api"] = "configured" if os.environ.get("TAVILY_API_KEY") else "not set"
     sources_status["serpapi"] = "configured" if os.environ.get("SERPAPI_KEY") else "not set"
     _log(f"Data sources: {json.dumps(sources_status)}")
@@ -2789,25 +2760,11 @@ def fetch_market_moneyflow_dc(pro=None) -> dict:
 
 
 def _get_tushare_pro():
-    """获取 tushare pro 对象，复用 token 获取逻辑。"""
-    import tushare as ts
-    token = os.environ.get("TUSHARE_TOKEN", "")
-    if not token:
-        workspace_root = os.path.abspath(os.path.expanduser(
-            os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-        ))
-        env_path = os.path.join(workspace_root, "repo", ".env")
-        if os.path.exists(env_path):
-            for line in open(env_path):
-                if "TUSHARE_TOKEN" in line:
-                    token = line.split("=", 1)[-1].strip()
-    if not token:
-        tp = os.path.expanduser("~/.tushare_token")
-        if os.path.exists(tp):
-            token = open(tp).read().strip()
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN 未配置；请写入 repo/.env 或环境变量")
-    return ts.pro_api(token)
+    if _shared_token():
+        return _shared_get_pro()
+    legacy = Path.home() / ".tushare_token"
+    fallback = legacy.read_text().strip() if legacy.exists() else ""
+    return _shared_get_pro(fallback_token=fallback)
 
 
 if __name__ == "__main__":

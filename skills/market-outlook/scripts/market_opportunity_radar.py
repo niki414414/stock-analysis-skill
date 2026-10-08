@@ -22,22 +22,22 @@ from pathlib import Path
 import pandas as pd
 from typing import Optional
 
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root, config_file, event_db_path
+from skills.shared.datasource import load_env as _shared_load_env, get_pro as _shared_get_pro
 
-WORKSPACE_ROOT = Path(
-    os.path.abspath(os.path.expanduser(
-        os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-    ))
-)
-REPO_ROOT = WORKSPACE_ROOT / "repo"
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+
+WORKSPACE_ROOT = workspace_root()
+REPO_ROOT = repo_root()
 DATA_ROOT = WORKSPACE_ROOT / "技能数据"
 SKILL_ROOT = REPO_ROOT / "skills" / "market-outlook"
 ALIASES_PATH = SKILL_ROOT / "config" / "sector_aliases.json"
 EVENT_QUERY = (
     REPO_ROOT / "skills" / "stock-analysis" / "scripts" / "event_map_query.py"
 )
-EVENT_DB = DATA_ROOT / "event_map_shadow.db"
+EVENT_DB = event_db_path()
 COMPANY_POOL = DATA_ROOT / "公司.xlsx"
 CODE_MAP = DATA_ROOT / "company_code_map.csv"
 QUALITY_CACHE = (
@@ -52,26 +52,12 @@ TECH_SECTORS = {"电子", "计算机", "通信", "国防军工"}
 BUCKET_WEIGHT = {"red": 4, "yellow": 3, "green": 2, "blue": 1, "gray": 0}
 
 
-def load_repo_env() -> None:
-    env_path = REPO_ROOT / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = (part.strip() for part in line.split("=", 1))
-        if key and value and (key == "TUSHARE_TOKEN" or key not in os.environ):
-            os.environ[key] = value
+def load_repo_env():
+    _shared_load_env(config_file())
 
 
 def get_pro():
-    load_repo_env()
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        raise RuntimeError("TUSHARE_TOKEN 未配置；请检查 repo/.env")
-    import tushare as ts
-    return ts.pro_api(token)
+    return _shared_get_pro()
 
 
 def normalize_code(raw) -> Optional[str]:

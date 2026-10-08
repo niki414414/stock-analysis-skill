@@ -28,6 +28,9 @@ python3 skills/market-outlook/scripts/market_brief_v2.py --save
 
 如果你是被临时拉来接手这个项目的 AI（Codex / Gemini / 其他），请先读 [HANDOFF.md](HANDOFF.md)。
 
+代码位置、活动数据、事件主库与行情配置的共同约定见
+[连接层约定](CONNECTION_CONTRACT.md)。模块应委托共享连接，不再自行解析密钥或固定桌面路径。
+
 ## 事件数据库当前状态
 
 SQLite已经是产业事件的唯一写入主库；CSV和Excel只作为查看、交换和恢复产物，禁止用旧CSV

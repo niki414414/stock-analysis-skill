@@ -20,16 +20,16 @@ from typing import Any, Iterable, Optional, Union
 
 import pandas as pd
 
+from skills.shared.paths import workspace_root, event_db_path
 
-WORKSPACE_ROOT = Path(os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-)))
+
+WORKSPACE_ROOT = workspace_root()
 DATA_ROOT = WORKSPACE_ROOT / "技能数据"
 TECH_ROOT = DATA_ROOT / "科技产业事件"
 NONFIN_ROOT = DATA_ROOT / "非科技产业事件地图"
 COMPANY_POOL = DATA_ROOT / "公司.xlsx"
 CODE_MAP = DATA_ROOT / "company_code_map.csv"
-DEFAULT_DB = DATA_ROOT / "event_map_shadow.db"
+DEFAULT_DB = event_db_path()
 DEFAULT_AUDIT = DATA_ROOT / "event_db_audit.json"
 DEFAULT_MIGRATION_HISTORY = DATA_ROOT / "event_db_migration_history.json"
 BJ_CODE_PREFIXES = ("83", "87", "88", "92", "43")

@@ -15,13 +15,14 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+_CODE_ROOT = Path(__file__).resolve().parents[1]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root, event_db_path
 
-WORKSPACE = Path(
-    os.path.abspath(os.path.expanduser(
-        os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-    ))
-)
-REPO = WORKSPACE / "repo"
+
+WORKSPACE = workspace_root()
+REPO = repo_root()
 ARCHIVE_ROOT = WORKSPACE / "迁移归档"
 
 # 只复制活动数据，不递归打包旧迁移包和历史程序快照。
@@ -165,7 +166,9 @@ def create_backup() -> Path:
         copied = []
         missing = []
         for rel in DATA_TARGETS:
-            src = WORKSPACE / rel
+            # The archive uses the canonical restore name even when the running
+            # framework selects another primary database through EVENT_MAP_DB.
+            src = event_db_path() if rel == Path("技能数据/event_map_shadow.db") else WORKSPACE / rel
             if src.exists():
                 copy_filtered(src, data_root / rel)
                 copied.append(rel.as_posix())
@@ -185,6 +188,7 @@ def create_backup() -> Path:
             "git_upstream": upstream,
             "git_ahead": ahead,
             "git_behind": behind,
+            "event_db_source": str(event_db_path()),
             "copied_targets": copied,
             "required_data_targets": [rel.as_posix() for rel in REQUIRED_DATA_TARGETS],
             "missing_optional_targets": missing,
@@ -205,7 +209,9 @@ def create_backup() -> Path:
             "3. 根据 `repo/.env.example` 新建 `repo/.env`，重新填写令牌；"
             "迁移包不包含任何凭据。\n"
             "4. 运行 `event_map_updater.py validate` 和单元测试确认完整性。\n"
-            "5. 使用本脚本的 `--verify` 参数校验ZIP内全部SHA-256。\n",
+            "5. 使用本脚本的 `--verify` 参数校验ZIP内全部SHA-256。\n"
+            "6. 如原环境设置EVENT_MAP_DB，清除旧路径或改指向恢复出的"
+            "技能数据/event_map_shadow.db；manifest中保留原主库来源。\n",
             encoding="utf-8",
         )
 

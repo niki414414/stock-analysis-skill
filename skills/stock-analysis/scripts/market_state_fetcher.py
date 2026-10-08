@@ -23,12 +23,16 @@ from pathlib import Path
 
 import pandas as pd
 
+_CODE_ROOT = Path(__file__).resolve().parents[3]
+if str(_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CODE_ROOT))
+from skills.shared.paths import repo_root, workspace_root
+from skills.shared.datasource import get_pro as _shared_get_pro
+
 warnings.filterwarnings("ignore")
 
-WORKSPACE_ROOT = os.path.abspath(os.path.expanduser(
-    os.environ.get("TZ_CODEX_HOME", "~/Desktop/tz-codex")
-))
-REPO_ROOT = os.path.join(WORKSPACE_ROOT, "repo")
+WORKSPACE_ROOT = str(workspace_root())
+REPO_ROOT = str(repo_root())
 STOCK_SKILL_DIR = os.path.join(REPO_ROOT, "skills", "stock-analysis")
 EXTERNAL_BASKET_SUPPLEMENT = os.path.join(
     REPO_ROOT, "skills", "market-outlook", "config",
@@ -47,7 +51,6 @@ from stock_data_fetcher import (  # noqa: E402
 )
 sys.path.insert(0, os.path.join(STOCK_SKILL_DIR, "scripts"))
 from event_map_query import query_status  # noqa: E402
-sys.path.insert(0, REPO_ROOT)
 from skills.shared.sector_preheat import build_sector_preheat_features  # noqa: E402
 sys.path.insert(0, os.path.join(REPO_ROOT, "skills", "market-outlook", "scripts"))
 from market_structure_v2 import build_market_structure_v2  # noqa: E402
@@ -65,22 +68,7 @@ MACRO_HEDGE_BASKETS = {
 
 
 def _get_pro():
-    token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        env_path = os.path.join(REPO_ROOT, ".env")
-        if os.path.exists(env_path):
-            with open(env_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line and "=" in line and not line.startswith("#"):
-                        k, v = line.split("=", 1)
-                        os.environ.setdefault(k.strip(), v.strip())
-        token = os.environ.get("TUSHARE_TOKEN")
-    if not token:
-        _log("TUSHARE_TOKEN 未配置")
-        sys.exit(1)
-    import tushare as ts
-    return ts.pro_api(token)
+    return _shared_get_pro()
 
 
 # "国家队/托底资金"代理指标：ETF是历史上护盘资金的标准操作载体(申购一级市场份额，

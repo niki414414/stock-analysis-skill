@@ -16,6 +16,11 @@ from pathlib import Path
 
 import pandas as pd
 
+import sys
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 import ma5_short_backtest as base
 
 
@@ -150,8 +155,8 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
     root = base.SCANNER.load_workspace_env()
-    import tushare as ts
-    pro = ts.pro_api(os.environ["TUSHARE_TOKEN"])
+    from skills.shared.datasource import get_pro
+    pro = get_pro()
     bars = base.fetch_history(
         pro, args.start, args.end, root / "技能数据" / "market_history_cache",
         warmup_days=args.warmup_days,
